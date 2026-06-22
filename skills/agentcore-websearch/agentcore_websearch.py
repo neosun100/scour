@@ -155,20 +155,22 @@ class AgentCoreWebSearch:
                 resp = requests.post(
                     self.url, data=body, headers=signed, timeout=60
                 )
+                # raise_for_status() makes sure no 4xx/5xx is silently treated as
+                # success (e.g. a 500 from the auth layer while we only expect 401).
+                resp.raise_for_status()
+            except requests.exceptions.HTTPError as e:
+                status = e.response.status_code
+                last_err = MCPError(
+                    f"HTTP {status} {e.response.reason}: {e.response.text}"
+                )
+                if status in self._RETRY_STATUSES and attempt < self._MAX_ATTEMPTS:
+                    time.sleep(min(2 ** (attempt - 1), 8))  # 1,2,4,8s backoff
+                    continue
+                raise last_err from None
             except requests.exceptions.RequestException as e:
                 last_err = MCPError(f"connection error: {e}")
                 if attempt < self._MAX_ATTEMPTS:
                     time.sleep(min(2 ** (attempt - 1), 8))
-                    continue
-                raise last_err from None
-
-            if resp.status_code >= 400:
-                last_err = MCPError(
-                    f"HTTP {resp.status_code} {resp.reason}: {resp.text}"
-                )
-                if resp.status_code in self._RETRY_STATUSES \
-                        and attempt < self._MAX_ATTEMPTS:
-                    time.sleep(min(2 ** (attempt - 1), 8))  # 1,2,4,8s backoff
                     continue
                 raise last_err from None
 
