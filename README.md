@@ -141,10 +141,30 @@ arn:aws:bedrock-agentcore:us-east-1:aws:tool/web-search.v1
 
 ## Cleanup
 
+Delete all resources created by `setup.sh` (the gateway, target, and IAM role) to
+avoid any further charges:
+
 ```bash
 AWS_PROFILE=your-profile ./teardown.sh
 ```
 
+Also remove local artifacts if you no longer need them:
+
+```bash
+rm -rf .venv .env
+```
+
+## Security
+
+See [CONTRIBUTING](CONTRIBUTING.md#security-issue-notifications) for information on
+reporting a potential security issue. Do not create a public GitHub issue for
+security findings.
+
+## Contributing
+
+Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). This project
+follows the [Amazon Open Source Code of Conduct](CODE_OF_CONDUCT.md).
+
 ## License
 
-MIT — see [LICENSE](LICENSE).
+This library is licensed under the MIT-0 License. See the [LICENSE](LICENSE) file.
