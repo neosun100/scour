@@ -30,8 +30,9 @@ import os
 import re
 import sys
 import time
-import urllib.request
 import urllib.error
+import urllib.parse
+import urllib.request
 
 try:
     from botocore.session import Session
@@ -44,6 +45,16 @@ SERVICE = "bedrock-agentcore"
 TOOL_NAME = "WebSearch"
 PROTOCOL_VERSION = "2025-06-18"
 
+# The gateway endpoint must be an HTTPS AgentCore Gateway host. We validate the
+# configured URL against this before handing it to urllib, because urllib also
+# honours non-HTTP schemes (e.g. file://, ftp://) — a value like
+# "file:///etc/passwd" would otherwise be read as a local file (SSRF / local file
+# read). Restricting to https on a *.gateway.bedrock-agentcore.<region>.amazonaws.com
+# host closes that vector.
+GATEWAY_HOST_RE = re.compile(
+    r"^[a-z0-9-]+\.gateway\.bedrock-agentcore\.[a-z0-9-]+\.amazonaws\.com$"
+)
+
 
 class MCPError(RuntimeError):
     pass
@@ -51,7 +62,7 @@ class MCPError(RuntimeError):
 
 class AgentCoreWebSearch:
     def __init__(self, gateway_url, region, profile=None):
-        self.url = gateway_url
+        self.url = self._validate_url(gateway_url)
         self.region = region
         sess = Session(profile=profile) if profile else Session()
         self.creds = sess.get_credentials()
@@ -73,6 +84,31 @@ class AgentCoreWebSearch:
         )
         self._session_id = None
         self._next_id = 0
+
+    @staticmethod
+    def _validate_url(url):
+        """Reject anything that is not an HTTPS AgentCore Gateway URL.
+
+        This runs before the URL ever reaches urllib. urllib honours non-HTTP
+        schemes such as file:// and ftp://, so without this check a malicious or
+        misconfigured AGENTCORE_GATEWAY_URL (e.g. "file:///etc/passwd") could turn
+        a "search" into an arbitrary local-file read or SSRF. Restricting to https
+        on a known AgentCore Gateway host eliminates that class of attack.
+        """
+        if not url:
+            raise MCPError("gateway URL is empty")
+        parsed = urllib.parse.urlparse(url)
+        if parsed.scheme != "https":
+            raise MCPError(
+                f"gateway URL must use https, got '{parsed.scheme or url}://...'"
+            )
+        if not parsed.hostname or not GATEWAY_HOST_RE.match(parsed.hostname):
+            raise MCPError(
+                "gateway URL host is not an AgentCore Gateway endpoint "
+                "(expected <id>.gateway.bedrock-agentcore.<region>.amazonaws.com): "
+                f"{parsed.hostname or url}"
+            )
+        return url
 
     @staticmethod
     def _region_from_url(url):
