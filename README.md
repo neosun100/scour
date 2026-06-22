@@ -1,11 +1,23 @@
 # AgentCore Web Search CLI (IAM / SigV4)
 
-Call the **AWS Bedrock AgentCore Web Search** tool from the command line using your
-**local AWS credentials** — no API keys, no bearer tokens. Includes a from-scratch
-setup script and a [Claude Code](https://docs.claude.com/claude-code) skill.
+This project **creates an Amazon Bedrock AgentCore Gateway and connects the managed
+Web Search tool to it**, then lets you call that tool from the command line using your
+**local AWS credentials** — no API keys, no bearer tokens. It ships a from-scratch
+setup script (gateway + IAM role + web-search target) and a
+[Claude Code](https://docs.claude.com/claude-code) skill that drives the whole
+lifecycle.
 
-AgentCore Web Search is a fully managed, MCP-compliant web search tool. Queries are
-served entirely within AWS (zero data egress), and results come back with titles,
+Because the gateway speaks the **Model Context Protocol (MCP)** and authenticates
+callers with **IAM (SigV4)**, it is a good fit for grounding IAM-authenticated,
+Bedrock-hosted agents in live web results — for example:
+
+- **Claude Code on Bedrock** — give the coding agent current web knowledge.
+- **Codex on Bedrock** — same, for OpenAI-style coding agents running against Bedrock.
+- **Cowork (3P) on Bedrock** — let third-party Cowork agents search the web through
+  your own gateway, with all queries staying inside your AWS account.
+
+AgentCore Web Search itself is a fully managed, MCP-compliant web search tool. Queries
+are served entirely within AWS (zero data egress), and results come back with titles,
 URLs, snippets, and publication dates. Pricing is ~$7 per 1,000 queries.
 
 > **Region:** Web Search is currently available only in `us-east-1`.
@@ -23,15 +35,15 @@ URLs, snippets, and publication dates. Pricing is ~$7 per 1,000 queries.
 
 ```
 your machine                              AWS account (us-east-1)
-┌──────────────┐                       ┌──────────────────────────┐                  ┌──────────────┐
-│ websearch CLI│   MCP over HTTPS       │  AgentCore Gateway        │   assume role    │ web-search   │
-│              │   (JSON-RPC 2.0:       │  MCP endpoint  /mcp       │ ───────────────▶ │ connector    │
-│ agentcore_   │    initialize,         │  authorizer: AWS_IAM      │  InvokeWebSearch │ (managed     │
-│ websearch.py │    tools/list,         │                           │                  │  web index)  │
-│  + requests  │    tools/call)         │                           │                  │              │
-│              │ ─────────────────────▶ │                           │                  │              │
-│              │   SigV4-signed (IAM)   │                           │                  │              │
-└──────────────┘                       └──────────────────────────┘                  └──────────────┘
+┌──────────────┐                        ┌──────────────────────────┐                  ┌──────────────┐
+│ websearch CLI│   MCP over HTTPS       │  AgentCore Gateway       │   assume role    │ web-search   │
+│              │   (JSON-RPC 2.0:       │  MCP endpoint  /mcp      │ ───────────────▶ │ connector    │
+│ agentcore_   │    initialize,         │  authorizer: AWS_IAM     │  InvokeWebSearch │ (managed     │
+│ websearch.py │    tools/list,         │                          │                  │  web index)  │
+│  + requests  │    tools/call)         │                          │                  │              │
+│              │ ─────────────────────▶ │                          │                  │              │
+│              │   SigV4-signed (IAM)   │                          │                  │              │
+└──────────────┘                        └──────────────────────────┘                  └──────────────┘
 ```
 
 The CLI is a minimal **MCP (Model Context Protocol) client**: it speaks JSON-RPC 2.0
