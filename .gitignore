@@ -1,4 +1,6 @@
-# Local configuration — contains your gateway URL / profile, never commit
+# Local configuration — contains your gateway URL / profile, never commit.
+# Patterns are unanchored, so they also match the runtime bundle in
+# skills/agentcore-websearch/ (.env, .venv there are ignored too).
 .env
 
 # Python

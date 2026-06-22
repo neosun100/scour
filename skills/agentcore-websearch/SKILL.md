@@ -12,21 +12,28 @@ cited, and current.
 
 This skill covers four operations: **status → setup → search → teardown**.
 
-## Resolve the repo directory first
+## Self-contained — scripts live in this folder
 
-Every command below runs from the `agentcore-websearch` repo. Resolve it once:
+All runtime files ship **inside this skill folder**, next to this `SKILL.md`:
+`setup.sh`, `teardown.sh`, `websearch`, `agentcore_websearch.py`, `iam/`,
+`requirements.txt`. Copying this one folder (e.g. into `~/.claude/skills/`) gives a
+fully working skill — nothing else to clone.
+
+Set `DIR` to this skill's own directory (the folder containing `SKILL.md`). If you
+know the skill's install path, use it directly, e.g.:
 
 ```bash
-DIR="${AGENTCORE_WEBSEARCH_DIR:-$HOME/agentcore-websearch}"
+DIR="$HOME/.claude/skills/agentcore-websearch"   # or wherever this folder lives
 ```
 
-If that path doesn't exist, ask the user where the repo is checked out (or to clone
-it) and set `AGENTCORE_WEBSEARCH_DIR` accordingly. Do not guess other paths.
+Every command below runs from `$DIR`. The scripts locate their own siblings
+(`iam/`, `agentcore_websearch.py`, `.env`, `.venv`) relative to themselves, so they
+work from any location as long as the folder is kept intact.
 
 ## Prerequisites
 
-- The `agentcore-websearch` repo checked out locally (contains `setup.sh`,
-  `teardown.sh`, `websearch`).
+- This skill folder present locally (it contains `setup.sh`, `teardown.sh`,
+  `websearch`, `agentcore_websearch.py`, `iam/`, `requirements.txt`).
 - AWS credentials available (an `AWS_PROFILE` or the default credential chain) with
   permission to create IAM roles and AgentCore gateways.
 - **AWS CLI v2 ≥ 2.35.0** (setup needs the gateway `connector` target shape).
@@ -40,7 +47,7 @@ Before searching or setting up, determine whether the gateway already exists. Th
 is read-only and never needs confirmation.
 
 ```bash
-DIR="${AGENTCORE_WEBSEARCH_DIR:-$HOME/agentcore-websearch}"
+DIR="$HOME/.claude/skills/agentcore-websearch"   # this skill folder
 # Is the CLI already configured?
 [ -f "$DIR/.env" ] && grep -q AGENTCORE_GATEWAY_URL "$DIR/.env" && echo "configured (.env present)" || echo "not configured"
 # Does a gateway exist in the account?
@@ -70,7 +77,7 @@ What setup creates (all in `us-east-1`):
 After the user agrees:
 
 ```bash
-DIR="${AGENTCORE_WEBSEARCH_DIR:-$HOME/agentcore-websearch}"
+DIR="$HOME/.claude/skills/agentcore-websearch"   # this skill folder
 # Pass the user's profile if they use one:
 AWS_PROFILE=<their-profile> "$DIR/setup.sh"
 ```
@@ -90,7 +97,7 @@ cd "$DIR" && python3 -m venv .venv && . .venv/bin/activate && pip install -r req
 ## 2. Search — the everyday operation
 
 ```bash
-DIR="${AGENTCORE_WEBSEARCH_DIR:-$HOME/agentcore-websearch}"
+DIR="$HOME/.claude/skills/agentcore-websearch"   # this skill folder
 "$DIR/websearch" "<search query>"
 ```
 
@@ -114,7 +121,7 @@ from the environment if exported.
 ### Examples
 
 ```bash
-DIR="${AGENTCORE_WEBSEARCH_DIR:-$HOME/agentcore-websearch}"
+DIR="$HOME/.claude/skills/agentcore-websearch"   # this skill folder
 "$DIR/websearch" "latest TypeScript release"
 "$DIR/websearch" "AWS re:Invent 2026 keynotes" --max-results 15 --json
 ```
@@ -132,7 +139,7 @@ DIR="${AGENTCORE_WEBSEARCH_DIR:-$HOME/agentcore-websearch}"
 After the user agrees:
 
 ```bash
-DIR="${AGENTCORE_WEBSEARCH_DIR:-$HOME/agentcore-websearch}"
+DIR="$HOME/.claude/skills/agentcore-websearch"   # this skill folder
 AWS_PROFILE=<their-profile> "$DIR/teardown.sh"
 ```
 

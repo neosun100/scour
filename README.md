@@ -37,6 +37,15 @@ your machine                         AWS account (us-east-1)
   which uses `boto3` to SigV4-sign requests. Not needed to create the infrastructure.
 - Access to Amazon Bedrock AgentCore in `us-east-1`.
 
+> **Layout:** all runnable files live in the self-contained bundle
+> `skills/agentcore-websearch/`. The commands below `cd` into it first. (This is
+> the same folder you copy into `~/.claude/skills/` to use it as a Claude Code
+> skill — see [Claude Code skill](#claude-code-skill).)
+
+```bash
+cd skills/agentcore-websearch
+```
+
 ## 1. Create the infrastructure
 
 The setup script creates the IAM service role, the gateway (with `AWS_IAM` inbound
@@ -56,12 +65,13 @@ REGION=us-east-1 \
 AWS_PROFILE=your-profile ./setup.sh
 ```
 
-At the end it prints an `export AGENTCORE_GATEWAY_URL=...` line and offers to write a
-local `.env`.
+At the end it prints an `export AGENTCORE_GATEWAY_URL=...` line and writes a local
+`.env` (in the bundle folder).
 
 ## 2. Configure the CLI
 
-Copy the example env file and fill in the gateway URL from step 1:
+`setup.sh` already writes `.env`; if you need to do it manually, copy the example and
+fill in the gateway URL from step 1:
 
 ```bash
 cp .env.example .env
@@ -105,18 +115,23 @@ python agentcore_websearch.py "your query" --max-results 10
 
 CLI flags `--gateway-url`, `--profile`, `--region` override the environment.
 
-## Files
+## Layout
 
-| File | Purpose |
-|---|---|
-| `agentcore_websearch.py` | The MCP client (SigV4-signs `initialize` + `tools/call`, retries transient auth errors) |
-| `websearch` | Bash wrapper; loads `.env`, requires `AGENTCORE_GATEWAY_URL` |
-| `setup.sh` | Creates the IAM role, gateway, and web-search target from scratch |
-| `teardown.sh` | Deletes everything `setup.sh` created |
-| `iam/*.template.json` | IAM trust/permission policy templates (placeholders filled by `setup.sh`) |
-| `skills/agentcore-websearch/SKILL.md` | Claude Code skill definition |
-| `.env.example` | Copy to `.env` and fill in |
-| `requirements.txt` | Pinned `boto3`/`botocore` |
+The repo root holds the README and open-source governance files. Everything runnable
+lives in the self-contained skill bundle, so copying that one folder is all you need:
+
+```
+.                                   # README, LICENSE, NOTICE, CONTRIBUTING, CODE_OF_CONDUCT
+└── skills/agentcore-websearch/     # ← self-contained bundle (also the Claude Code skill)
+    ├── SKILL.md                    # Claude Code skill definition (full lifecycle)
+    ├── setup.sh                    # creates IAM role + gateway + web-search target
+    ├── teardown.sh                 # deletes everything setup.sh created
+    ├── websearch                   # bash wrapper; loads .env, requires AGENTCORE_GATEWAY_URL
+    ├── agentcore_websearch.py      # MCP client (SigV4-signs initialize + tools/call, auto-retries)
+    ├── iam/*.template.json         # IAM trust/permission templates (placeholders filled by setup.sh)
+    ├── requirements.txt            # boto3 (runtime, for the search CLI only)
+    └── .env.example                # copy to .env and fill in
+```
 
 ## Claude Code skill
 
@@ -127,14 +142,17 @@ folder into your Claude Code skills directory:
 cp -r skills/agentcore-websearch ~/.claude/skills/
 ```
 
+Because the folder is self-contained (scripts, Python client, IAM templates, and
+`requirements.txt` all live inside it), that single `cp -r` is the entire install —
+nothing else to clone or configure.
+
 The skill manages the **full lifecycle** — checking status, creating the gateway
 (`setup.sh`), searching, and tearing it down (`teardown.sh`). It asks for your
 explicit confirmation before any setup or teardown, since those create or delete
 billable AWS resources. Searching an already-configured gateway runs without
 prompting.
 
-Set `AGENTCORE_WEBSEARCH_DIR` if the repo isn't at the default `~/agentcore-websearch`
-path. Then ask Claude Code to "set up agentcore websearch", "search the web with
+Then ask Claude Code to "set up agentcore websearch", "search the web with
 agentcore", or "tear down agentcore" — see the SKILL.md for details.
 
 ## ⚠️ Note on the InvokeWebSearch ARN
@@ -152,9 +170,10 @@ arn:aws:bedrock-agentcore:us-east-1:aws:tool/web-search.v1
 ## Cleanup
 
 Delete all resources created by `setup.sh` (the gateway, target, and IAM role) to
-avoid any further charges:
+avoid any further charges (run from `skills/agentcore-websearch/`):
 
 ```bash
+cd skills/agentcore-websearch
 AWS_PROFILE=your-profile ./teardown.sh
 ```
 
