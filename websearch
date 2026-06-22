@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# Convenience wrapper for the AgentCore Web Search CLI.
+#
+# Configuration (via environment, or a local .env file next to this script):
+#   AGENTCORE_GATEWAY_URL   (required) the gateway MCP URL
+#   AWS_PROFILE             (optional) AWS profile; otherwise default cred chain
+#
+# Usage:
+#   export AGENTCORE_GATEWAY_URL="https://<gateway-id>.gateway.bedrock-agentcore.us-east-1.amazonaws.com/mcp"
+#   ./websearch "your query"
+#   ./websearch "your query" --max-results 5 --json
+#
+set -euo pipefail
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Load a local .env if present (not committed; see .env.example).
+if [ -f "$HERE/.env" ]; then
+  set -a
+  # shellcheck disable=SC1091
+  . "$HERE/.env"
+  set +a
+fi
+
+if [ -z "${AGENTCORE_GATEWAY_URL:-}" ]; then
+  echo "ERROR: AGENTCORE_GATEWAY_URL is not set." >&2
+  echo "  Set it in your shell or in $HERE/.env (see .env.example)." >&2
+  echo "  Run ./setup.sh to create the gateway and print its URL." >&2
+  exit 1
+fi
+export AGENTCORE_GATEWAY_URL
+
+PY="$HERE/.venv/bin/python"
+[ -x "$PY" ] || PY="$(command -v python3)"
+
+exec "$PY" "$HERE/agentcore_websearch.py" "$@"

@@ -1,0 +1,17 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "InvokeGateway",
+      "Effect": "Allow",
+      "Action": "bedrock-agentcore:InvokeGateway",
+      "Resource": "arn:aws:bedrock-agentcore:${REGION}:${ACCOUNT_ID}:gateway/*"
+    },
+    {
+      "Sid": "InvokeWebSearch",
+      "Effect": "Allow",
+      "Action": "bedrock-agentcore:InvokeWebSearch",
+      "Resource": "arn:aws:bedrock-agentcore:${REGION}:aws:tool/web-search.v1"
+    }
+  ]
+}
