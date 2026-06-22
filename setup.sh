@@ -16,7 +16,8 @@
 #   ROLE_NAME       default: AgentCoreWebSearchGatewayRole
 #   TARGET_NAME     default: web-search-tool
 #
-# Requirements: aws CLI v2, python3 with boto3>=1.43 (auto-installed into .venv).
+# Requirements: AWS CLI v2 >= 2.35.0 (older versions lack the gateway "connector"
+# target shape needed for the Web Search tool — the script checks and tells you).
 #
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -31,8 +32,17 @@ say()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[!]\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 
-command -v aws >/dev/null     || die "aws CLI not found"
-command -v python3 >/dev/null || die "python3 not found"
+command -v aws >/dev/null || die "aws CLI not found (install AWS CLI v2 >= 2.35.0)"
+
+# The Web Search tool is configured as a gateway "connector" target. That shape
+# was added to the AgentCore model in AWS CLI v2 2.35.0. Verify the installed CLI
+# supports it rather than failing later with a confusing parameter error.
+if ! aws bedrock-agentcore-control create-gateway-target help 2>/dev/null \
+     | grep -q "connector"; then
+  die "your AWS CLI does not support the 'connector' gateway target.
+       Upgrade to AWS CLI v2 >= 2.35.0:  https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html
+       (current: $(aws --version 2>&1))"
+fi
 
 AWS_ARGS=(--region "$REGION")
 [ -n "${AWS_PROFILE:-}" ] && AWS_ARGS+=(--profile "$AWS_PROFILE")
@@ -40,21 +50,7 @@ AWS_ARGS=(--region "$REGION")
 say "Resolving account identity..."
 ACCOUNT_ID="$(aws "${AWS_ARGS[@]}" sts get-caller-identity --query Account --output text)" \
   || die "could not get caller identity — check your AWS credentials"
-say "Account: $ACCOUNT_ID   Region: $REGION"
-
-# ---------------------------------------------------------------------------
-# Python env with boto3>=1.43 (the bundled CLI/older boto3 lack 'connector').
-# ---------------------------------------------------------------------------
-VENV="$HERE/.venv"
-if [ ! -x "$VENV/bin/python" ]; then
-  say "Creating virtualenv with boto3>=1.43..."
-  python3 -m venv "$VENV"
-fi
-PY="$VENV/bin/python"
-"$PY" -m pip install -q --upgrade pip >/dev/null
-"$PY" -m pip install -q "boto3>=1.43" "botocore>=1.43" >/dev/null
-BOTO_VER="$("$PY" -c 'import boto3;print(boto3.__version__)')"
-say "boto3 $BOTO_VER"
+say "Account: $ACCOUNT_ID   Region: $REGION   ($(aws --version 2>&1 | cut -d' ' -f1))"
 
 # ---------------------------------------------------------------------------
 # 1. IAM service role
@@ -123,7 +119,7 @@ GATEWAY_URL="$(aws "${AWS_ARGS[@]}" bedrock-agentcore-control get-gateway \
   --gateway-identifier "$GATEWAY_ID" --query 'gatewayUrl' --output text)"
 
 # ---------------------------------------------------------------------------
-# 3. web-search target (needs the boto3 'connector' shape -> use our venv).
+# 3. web-search connector target (pure AWS CLI; requires CLI >= 2.35.0)
 # ---------------------------------------------------------------------------
 EXISTING_TARGET="$(aws "${AWS_ARGS[@]}" bedrock-agentcore-control list-gateway-targets \
   --gateway-identifier "$GATEWAY_ID" \
@@ -134,27 +130,13 @@ if [ -n "$EXISTING_TARGET" ] && [ "$EXISTING_TARGET" != "None" ]; then
   TARGET_ID="$EXISTING_TARGET"
 else
   say "Creating web-search target $TARGET_NAME..."
-  TARGET_ID="$(
-    AWS_REGION="$REGION" AWS_PROFILE="${AWS_PROFILE:-}" \
-    GATEWAY_ID="$GATEWAY_ID" TARGET_NAME="$TARGET_NAME" REGION="$REGION" \
-    "$PY" - <<'PYEOF'
-import os, boto3
-gw = boto3.client("bedrock-agentcore-control", region_name=os.environ["REGION"])
-r = gw.create_gateway_target(
-    name=os.environ["TARGET_NAME"],
-    description="Built-in Web Search connector",
-    gatewayIdentifier=os.environ["GATEWAY_ID"],
-    targetConfiguration={
-        "mcp": {"connector": {
-            "source": {"connectorId": "web-search"},
-            "configurations": [{"name": "WebSearch", "parameterValues": {}}],
-        }}
-    },
-    credentialProviderConfigurations=[{"credentialProviderType": "GATEWAY_IAM_ROLE"}],
-)
-print(r["targetId"])
-PYEOF
-  )"
+  TARGET_ID="$(aws "${AWS_ARGS[@]}" bedrock-agentcore-control create-gateway-target \
+    --gateway-identifier "$GATEWAY_ID" \
+    --name "$TARGET_NAME" \
+    --description "Built-in Web Search connector" \
+    --target-configuration '{"mcp":{"connector":{"source":{"connectorId":"web-search"},"configurations":[{"name":"WebSearch","parameterValues":{}}]}}}' \
+    --credential-provider-configurations '[{"credentialProviderType":"GATEWAY_IAM_ROLE"}]' \
+    --query 'targetId' --output text)"
   say "Target ID: $TARGET_ID"
 fi
 

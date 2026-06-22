@@ -31,7 +31,10 @@ your machine                         AWS account (us-east-1)
 
 - An AWS account and credentials (`aws configure` or SSO profile) with permission to
   create IAM roles and AgentCore gateways.
-- AWS CLI v2, Python 3.9+, and `bash`.
+- **AWS CLI v2 >= 2.35.0** and `bash` — earlier CLI versions lack the gateway
+  `connector` target shape (`setup.sh` checks and tells you to upgrade).
+- **Python 3.9+** — only for running the search CLI (`agentcore_websearch.py`),
+  which uses `boto3` to SigV4-sign requests. Not needed to create the infrastructure.
 - Access to Amazon Bedrock AgentCore in `us-east-1`.
 
 ## 1. Create the infrastructure
@@ -72,7 +75,9 @@ python -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-> `boto3>=1.43` is required — earlier versions lack the `connector` gateway target type.
+> `boto3` here is only used by the search CLI to SigV4-sign requests; any recent
+> version works. (Creating the infrastructure is done entirely by `setup.sh` via the
+> AWS CLI — no Python or boto3 involved.)
 
 ## 3. Search
 
