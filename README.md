@@ -10,6 +10,15 @@ URLs, snippets, and publication dates. Pricing is ~$7 per 1,000 queries.
 
 > **Region:** Web Search is currently available only in `us-east-1`.
 
+> [!WARNING]
+> **Not for production use.** This repository is a sample / demonstration intended
+> for learning and experimentation. It has not been hardened for production
+> workloads — it omits production concerns such as least-privilege role scoping,
+> monitoring/alarming, rate limiting, multi-region/HA, automated credential
+> rotation, and comprehensive error handling. Review, adapt, and test it against
+> your own security and operational requirements before any real-world use. It is
+> provided "as is" without warranty (see [LICENSE](LICENSE)).
+
 ## How it works
 
 ```
