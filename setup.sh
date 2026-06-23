@@ -7,7 +7,8 @@
 #   2. An AgentCore Gateway with AWS_IAM inbound auth (callers use local creds).
 #   3. A web-search connector target exposing the WebSearch tool.
 #
-# Then prints the gateway URL and (optionally) writes a local .env.
+# Then prints the gateway URL and writes it into the search skill's .env
+# (skills/agentcore-websearch/.env) so the websearch CLI works immediately.
 #
 # Configuration via environment (all optional except credentials):
 #   AWS_PROFILE     AWS profile to use (or rely on the default credential chain)
@@ -163,16 +164,22 @@ echo "  Add this to your shell:"
 echo "    export AGENTCORE_GATEWAY_URL=\"$GATEWAY_URL\""
 echo
 
-ENV_FILE="$HERE/.env"
-if [ -f "$ENV_FILE" ]; then
-  warn ".env already exists — not overwriting. Update AGENTCORE_GATEWAY_URL manually if needed."
-else
-  {
-    echo "AGENTCORE_GATEWAY_URL=$GATEWAY_URL"
-    [ -n "${AWS_PROFILE:-}" ] && echo "AWS_PROFILE=$AWS_PROFILE"
-  } > "$ENV_FILE"
-  say "Wrote $ENV_FILE"
+# Write the gateway URL into the search skill's .env so `websearch` works
+# immediately after setup. The skill bundle lives at skills/agentcore-websearch/.
+SKILL_DIR="$HERE/skills/agentcore-websearch"
+ENV_FILE="$SKILL_DIR/.env"
+if [ -d "$SKILL_DIR" ]; then
+  if [ -f "$ENV_FILE" ]; then
+    warn ".env already exists at $ENV_FILE — not overwriting."
+    warn "Update AGENTCORE_GATEWAY_URL there if the gateway changed."
+  else
+    {
+      echo "AGENTCORE_GATEWAY_URL=$GATEWAY_URL"
+      [ -n "${AWS_PROFILE:-}" ] && echo "AWS_PROFILE=$AWS_PROFILE"
+    } > "$ENV_FILE"
+    say "Wrote $ENV_FILE"
+  fi
 fi
 
 echo
-say "Test it:  ./websearch \"latest AWS news\""
+say "Test it:  cd skills/agentcore-websearch && ./websearch \"latest AWS news\""

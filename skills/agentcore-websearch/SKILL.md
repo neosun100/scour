@@ -1,101 +1,46 @@
 ---
 name: agentcore-websearch
-description: Web search via AWS Bedrock AgentCore Web Search, called with local AWS/IAM credentials (SigV4) — no API keys or bearer tokens. Also manages the full lifecycle of the underlying AWS gateway (create/teardown). Use when the user asks to search the web, look up current events, find recent/online information, research topics needing up-to-date web results, OR to set up / tear down their AgentCore Web Search gateway. Triggers - 'agentcore search', 'search the web with agentcore', 'web search', 'look up', 'find online', 'what is the latest', 'current news about', 'research', 'set up agentcore websearch', 'create the gateway', 'tear down agentcore', 'delete the gateway'.
+description: Web search via an AWS Bedrock AgentCore Gateway, called with local AWS/IAM credentials (SigV4) — no API keys or bearer tokens. Use when the user asks to search the web, look up current events, find recent/online information, or research topics needing up-to-date web results through their AgentCore Web Search gateway. Triggers - 'agentcore search', 'search the web with agentcore', 'web search', 'look up', 'find online', 'what is the latest', 'current news about', 'research'. Requires a gateway that was already provisioned (see the project's AGENTS.md); this skill does not create or delete AWS resources.
 ---
 
-# AgentCore Web Search — full lifecycle
+# AgentCore Web Search
 
 Search the web using the **AgentCore Web Search** tool through a private MCP gateway
-in the user's AWS account, and manage that gateway's lifecycle. Authentication is
-**local AWS credentials (SigV4/IAM)** — no API keys or tokens. Results are grounded,
-cited, and current.
+in the user's AWS account. Authentication is **local AWS credentials (SigV4/IAM)** —
+no API keys or tokens. Results are grounded, cited, and current.
 
-This skill covers four operations: **status → setup → search → teardown**.
+> [!NOTE]
+> This skill **only searches**. It assumes the AgentCore Gateway + Web Search tool
+> already exist and that `AGENTCORE_GATEWAY_URL` is configured. Creating or deleting
+> that infrastructure (the `setup.sh` / `teardown.sh` scripts) is **not** part of
+> this skill — see the project's **AGENTS.md** for the one-time setup/teardown guide.
+> This skill never creates or deletes AWS resources.
 
-## Self-contained — scripts live in this folder
+## Self-contained — search files live in this folder
 
-All runtime files ship **inside this skill folder**, next to this `SKILL.md`:
-`setup.sh`, `teardown.sh`, `websearch`, `agentcore_websearch.py`, `iam/`,
-`requirements.txt`. Copying this one folder (e.g. into `~/.claude/skills/`) gives a
-fully working skill — nothing else to clone.
+This folder ships everything needed to *search*: `websearch`, `agentcore_websearch.py`,
+`requirements.txt`, `.env.example`, and this `SKILL.md`. Copying this one folder
+(e.g. into `~/.claude/skills/`) gives a working search skill — provided a gateway
+already exists.
 
-Set `DIR` to this skill's own directory (the folder containing `SKILL.md`). If you
-know the skill's install path, use it directly, e.g.:
+Resolve `DIR` to this skill's own directory:
 
 ```bash
 DIR="$HOME/.claude/skills/agentcore-websearch"   # or wherever this folder lives
 ```
 
-Every command below runs from `$DIR`. The scripts locate their own siblings
-(`iam/`, `agentcore_websearch.py`, `.env`, `.venv`) relative to themselves, so they
-work from any location as long as the folder is kept intact.
-
 ## Prerequisites
 
-- This skill folder present locally (it contains `setup.sh`, `teardown.sh`,
-  `websearch`, `agentcore_websearch.py`, `iam/`, `requirements.txt`).
-- AWS credentials available (an `AWS_PROFILE` or the default credential chain) with
-  permission to create IAM roles and AgentCore gateways.
-- **AWS CLI v2 ≥ 2.35.0** (setup needs the gateway `connector` target shape).
-- **Python 3.9+** for the search CLI; its one dependency, `mcp-proxy-for-aws`
-  (from `requirements.txt`), brings boto3/botocore and the `mcp` SDK.
+- A provisioned AgentCore Gateway with the Web Search tool, and its URL available as
+  `AGENTCORE_GATEWAY_URL` (in the environment or in this folder's `.env`). If it
+  isn't set up yet, follow **AGENTS.md** in the project repository first.
+- AWS credentials available (an `AWS_PROFILE` or the default credential chain) whose
+  IAM principal has `bedrock-agentcore:InvokeGateway` on the gateway.
+- **Python 3.9+**; the one dependency, `mcp-proxy-for-aws` (from `requirements.txt`),
+  brings boto3/botocore and the `mcp` SDK. Install once:
+  `cd "$DIR" && python3 -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt`
 
----
-
-## 0. Check status (always safe — do this first)
-
-Before searching or setting up, determine whether the gateway already exists. This
-is read-only and never needs confirmation.
-
-```bash
-DIR="$HOME/.claude/skills/agentcore-websearch"   # this skill folder
-# Is the CLI already configured?
-[ -f "$DIR/.env" ] && grep -q AGENTCORE_GATEWAY_URL "$DIR/.env" && echo "configured (.env present)" || echo "not configured"
-# Does a gateway exist in the account?
-aws bedrock-agentcore-control list-gateways --region us-east-1 \
-  --query "items[?name=='WebSearchGateway'].{id:gatewayId,status:status}" --output table
-```
-
-- **Configured + gateway READY** → go straight to **§2 Search**.
-- **Not configured / no gateway** → propose **§1 Setup** (with confirmation).
-
----
-
-## 1. Setup — creates billable AWS resources ⚠️ CONFIRM FIRST
-
-> [!IMPORTANT]
-> `setup.sh` **creates real AWS resources** (an IAM role, an AgentCore Gateway, and
-> a web-search target) and Web Search is **billed at ~$7 per 1,000 queries**.
-> **You MUST get the user's explicit agreement before running it.** State exactly
-> what will be created and the cost, then wait for a clear "yes".
-
-What setup creates (all in `us-east-1`):
-1. IAM service role `AgentCoreWebSearchGatewayRole` (assumed by the gateway at
-   query time to call the connector).
-2. AgentCore Gateway `WebSearchGateway` with `AWS_IAM` inbound auth.
-3. A `web-search` connector target exposing the `WebSearch` tool.
-
-After the user agrees:
-
-```bash
-DIR="$HOME/.claude/skills/agentcore-websearch"   # this skill folder
-# Pass the user's profile if they use one:
-AWS_PROFILE=<their-profile> "$DIR/setup.sh"
-```
-
-`setup.sh` is **idempotent** (reuses existing role/gateway/target) and writes the
-gateway URL to `$DIR/.env`. Optional overrides: `REGION`, `GATEWAY_NAME`,
-`ROLE_NAME`, `TARGET_NAME` (must match at teardown).
-
-Then install the Python dependency for the search CLI (once):
-
-```bash
-cd "$DIR" && python3 -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt
-```
-
----
-
-## 2. Search — the everyday operation
+## Search
 
 ```bash
 DIR="$HOME/.claude/skills/agentcore-websearch"   # this skill folder
@@ -104,14 +49,14 @@ DIR="$HOME/.claude/skills/agentcore-websearch"   # this skill folder
 
 Options:
 - `--max-results N` — number of results, 1–25 (default 10)
-- `--json` — raw MCP result JSON (parse `content[0].text` → `results[]` with
-  fields `text`, `url`, `title`, `publishedDate`)
+- `--json` — raw tool result JSON (parse `results[]` with fields `text`, `url`,
+  `title`, `publishedDate`)
 - `--list-tools` — show the gateway's tools (diagnostic)
 
-The wrapper reads `AGENTCORE_GATEWAY_URL` from `$DIR/.env` (written by setup), or
-from the environment if exported.
+The wrapper reads `AGENTCORE_GATEWAY_URL` (and optional `AWS_PROFILE`) from this
+folder's `.env`, or from the environment if exported.
 
-### Search workflow
+### Workflow
 
 1. Formulate a focused query (**must be ≤ 200 characters**).
 2. Run the wrapper with an appropriate `--max-results`.
@@ -122,67 +67,23 @@ from the environment if exported.
 ### Examples
 
 ```bash
-DIR="$HOME/.claude/skills/agentcore-websearch"   # this skill folder
+DIR="$HOME/.claude/skills/agentcore-websearch"
 "$DIR/websearch" "latest TypeScript release"
 "$DIR/websearch" "AWS re:Invent 2026 keynotes" --max-results 15 --json
 ```
-
----
-
-## 3. Teardown — destroys AWS resources ⚠️ CONFIRM FIRST
-
-> [!IMPORTANT]
-> `teardown.sh` **permanently deletes** the web-search target, the gateway, and the
-> IAM role created by setup. **You MUST get the user's explicit agreement before
-> running it.** Confirm they want the resources destroyed; after teardown, searching
-> will fail until setup is run again.
-
-After the user agrees:
-
-```bash
-DIR="$HOME/.claude/skills/agentcore-websearch"   # this skill folder
-AWS_PROFILE=<their-profile> "$DIR/teardown.sh"
-```
-
-If setup used custom names, pass the same `GATEWAY_NAME`/`ROLE_NAME`/`TARGET_NAME`
-so teardown targets the right resources. Optionally also remove local artifacts:
-
-```bash
-rm -rf "$DIR/.venv" "$DIR/.env"
-```
-
-Verify nothing remains:
-
-```bash
-aws bedrock-agentcore-control list-gateways --region us-east-1 \
-  --query "items[?name=='WebSearchGateway'].gatewayId" --output text
-# (empty output = fully torn down)
-```
-
----
-
-## Confirmation policy (do not skip)
-
-- **Read-only** (status checks, `list-gateways`, `--list-tools`, searching an
-  already-configured gateway): run without asking.
-- **`setup.sh`**: ask first — it creates billable resources.
-- **`teardown.sh`**: ask first — it deletes resources irreversibly.
-- When in doubt, describe the action and its cost/impact, then wait for a clear yes.
 
 ## Notes & limits
 
 - **Region:** the gateway lives in `us-east-1`; the CLI signs for the host region
   automatically, so a different `AWS_REGION` in the shell is fine.
-- **Cost:** ~$7 per 1,000 queries (each search = one query). The gateway/role/target
-  themselves have no standing charge, but leaving them up is harmless if unused.
+- **Cost:** ~$7 per 1,000 queries (each search = one query).
 - **Transport:** the CLI uses the `mcp-proxy-for-aws` library
   (`aws_iam_streamablehttp_client`) with the `mcp` SDK's `ClientSession`, in-process —
   the library does the SigV4 signing, MCP handshake, and region signing. No signing
-  code or subprocess lives in this repo.
+  code or subprocess lives in this folder.
 - **Common errors:**
-  - `AGENTCORE_GATEWAY_URL is not set` → run §1 Setup, or export the URL.
+  - `AGENTCORE_GATEWAY_URL is not set` → the gateway isn't configured here; set the
+    env var, or provision it per the project's **AGENTS.md**.
   - credentials missing/expired → refresh your `AWS_PROFILE` / SSO login.
   - `Insufficient permissions` → caller lacks `bedrock-agentcore:InvokeGateway`.
-  - `Execution role is not authorized for connector` → gateway service-role policy
-    issue (infra, not the caller); re-run `setup.sh`.
-  - `mcp-proxy-for-aws is required` → `pip install -r requirements.txt` in the bundle.
+  - `mcp-proxy-for-aws is required` → `pip install -r requirements.txt` in this folder.

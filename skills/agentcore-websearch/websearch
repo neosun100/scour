@@ -24,7 +24,7 @@ fi
 if [ -z "${AGENTCORE_GATEWAY_URL:-}" ]; then
   echo "ERROR: AGENTCORE_GATEWAY_URL is not set." >&2
   echo "  Set it in your shell or in $HERE/.env (see .env.example)." >&2
-  echo "  Run ./setup.sh to create the gateway and print its URL." >&2
+  echo "  If the gateway is not set up yet, follow AGENTS.md in the project repo." >&2
   exit 1
 fi
 export AGENTCORE_GATEWAY_URL
