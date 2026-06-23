@@ -12,8 +12,8 @@ no API keys or tokens. Results are grounded, cited, and current.
 > [!NOTE]
 > This skill **only searches**. It assumes the AgentCore Gateway + Web Search tool
 > already exist and that `AGENTCORE_GATEWAY_URL` is configured. Creating or deleting
-> that infrastructure (the `setup.sh` / `teardown.sh` scripts) is **not** part of
-> this skill — see the project's **AGENTS.md** for the one-time setup/teardown guide.
+> that infrastructure (a CloudFormation stack) is **not** part of this skill — see the
+> project's **AGENTS.md** for the one-time setup/teardown guide.
 > This skill never creates or deletes AWS resources.
 
 ## Self-contained — search files live in this folder

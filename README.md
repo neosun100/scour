@@ -71,8 +71,7 @@ no hand-rolled signing code.
 - An AWS account and credentials (`aws configure` or SSO profile) with permission to
   create IAM roles and AgentCore gateways.
 - **AWS CLI v2 >= 2.35.0** and `bash` — earlier CLI versions lack the gateway
-  `connector` target shape (`setup.sh` checks and tells you to upgrade). Setup deploys
-  an **AWS CloudFormation** stack.
+  `connector` target shape. Provisioning deploys an **AWS CloudFormation** stack.
 - **Python 3.9+** — only for running the search CLI. Its one dependency is
   `mcp-proxy-for-aws` (which brings `boto3`, `botocore`, and the `mcp` SDK). Not
   needed to create the infrastructure.
@@ -86,43 +85,59 @@ git clone https://github.com/aws-samples/agentcore-websearch.git
 cd agentcore-websearch
 ```
 
-**Layout in brief:** provisioning lives at the **project root** (`setup.sh`,
-`teardown.sh`, `iam/`); the **search skill** lives in `skills/agentcore-websearch/`.
+**Layout in brief:** the **CloudFormation template** for provisioning lives at the
+**project root** (`cfn/`); the **search skill** lives in `skills/agentcore-websearch/`.
 The full setup/teardown guide is [AGENTS.md](AGENTS.md).
 
 ## Two ways to use it
 
-1. **Run it locally** — provision the gateway (step 1, from the repo root), then
-   search from your terminal with the `websearch` CLI (step 3).
+1. **Run it locally** — deploy the gateway with CloudFormation (step 1), install the
+   CLI (step 2), and search from your terminal (step 3).
 2. **Use it as a Claude Code skill** — import `skills/agentcore-websearch/` so Claude
    Code can search for you. See [Use it as a Claude Code skill](#use-it-as-a-claude-code-skill).
-   (Provisioning is still a one-time step — see [AGENTS.md](AGENTS.md).)
+   (Provisioning is still a one-time step — do step 1 first.)
 
-## 1. Create the infrastructure (from the repo root)
+There are **no setup scripts** — provisioning is a couple of `aws cloudformation`
+commands run from the repo root, shown below. [AGENTS.md](AGENTS.md) has the same
+steps with more context.
 
-`setup.sh` deploys the CloudFormation stack `agentcore-websearch`
-([`cfn/agentcore-websearch.yaml`](cfn/agentcore-websearch.yaml): IAM service role +
-AgentCore Gateway with `AWS_IAM` inbound auth + web-search target), then prints the
-gateway URL **and writes it into `skills/agentcore-websearch/.env`** so the search CLI
-works immediately.
+## 1. Create the infrastructure (CloudFormation, from the repo root)
 
-```bash
-# from the repo root; uses your current AWS credentials / AWS_PROFILE
-AWS_PROFILE=your-profile ./setup.sh
-```
-
-Useful overrides (all optional — pass the same `STACK_NAME` to `teardown.sh`):
+The template [`cfn/agentcore-websearch.yaml`](cfn/agentcore-websearch.yaml) defines
+the IAM service role, the AgentCore Gateway (`AWS_IAM` inbound auth), and the
+web-search target. Deploy it as a stack named `agentcore-websearch` (set
+`AWS_PROFILE`/`--region` to taste; Web Search is only in `us-east-1`):
 
 ```bash
-STACK_NAME=agentcore-websearch \
-GATEWAY_NAME=MyWebSearchGateway \
-TARGET_NAME=web-search-tool \
-REGION=us-east-1 \
-AWS_PROFILE=your-profile ./setup.sh
+aws cloudformation deploy \
+  --region us-east-1 \
+  --stack-name agentcore-websearch \
+  --template-file cfn/agentcore-websearch.yaml \
+  --capabilities CAPABILITY_IAM
 ```
 
-See [AGENTS.md](AGENTS.md) for the full setup/teardown guide (what gets created, the
-confirmation policy, and how auth works).
+Read the gateway URL from the stack output:
+
+```bash
+aws cloudformation describe-stacks \
+  --region us-east-1 --stack-name agentcore-websearch \
+  --query "Stacks[0].Outputs[?OutputKey=='GatewayUrl'].OutputValue" --output text
+```
+
+Save it where the search CLI will find it — `skills/agentcore-websearch/.env`:
+
+```bash
+GATEWAY_URL=$(aws cloudformation describe-stacks \
+  --region us-east-1 --stack-name agentcore-websearch \
+  --query "Stacks[0].Outputs[?OutputKey=='GatewayUrl'].OutputValue" --output text)
+printf 'AGENTCORE_GATEWAY_URL=%s\n' "$GATEWAY_URL" > skills/agentcore-websearch/.env
+```
+
+> Requires **AWS CLI v2 ≥ 2.35.0** (older versions lack the gateway `connector`
+> target shape). Optional template parameters: `GatewayName` (default
+> `WebSearchGateway`) and `TargetName` (default `web-search-tool`) via
+> `--parameter-overrides`. See [AGENTS.md](AGENTS.md) for what gets created and how
+> auth works.
 
 ## 2. Install the search CLI dependency
 
@@ -137,14 +152,14 @@ pip install .            # installs the `agentcore-websearch` console command
 > [`mcp-proxy-for-aws`](https://pypi.org/project/mcp-proxy-for-aws/) (which brings
 > `boto3`, `botocore`, and the `mcp` SDK); the CLI imports its
 > `aws_iam_streamablehttp_client` to do the SigV4 signing and MCP transport in-process.
-> `setup.sh` already wrote this folder's `.env`; to point at a different gateway, copy
+> Step 1 already wrote this folder's `.env`; to point at a different gateway, copy
 > `.env.example` to `.env` and edit `AGENTCORE_GATEWAY_URL`.
 
 ## 3. Trigger and test the search locally
 
 From `skills/agentcore-websearch/`, run the `websearch` wrapper. It loads
-`AGENTCORE_GATEWAY_URL` (and optionally `AWS_PROFILE`) from the `.env` that `setup.sh`
-wrote, opens a SigV4-signed MCP connection with your local AWS credentials, and prints ranked results.
+`AGENTCORE_GATEWAY_URL` (and optionally `AWS_PROFILE`) from the `.env` you wrote in
+step 1, opens a SigV4-signed MCP connection with your local AWS credentials, and prints ranked results.
 
 **Smoke test** — confirm the gateway and tool are reachable:
 
@@ -198,7 +213,7 @@ python -m agentcore_websearch.cli "your query" --max-results 10
 | `AGENTCORE_GATEWAY_URL is not set` | no `.env` / env var | run step 1, or `cp .env.example .env` and fill it in |
 | `401 Authentication error` | AWS credentials missing/expired | refresh your `AWS_PROFILE` / SSO login |
 | `403 Insufficient permissions` | caller lacks `bedrock-agentcore:InvokeGateway` | grant it (admin creds already have it) |
-| `Execution role is not authorized for connector` | gateway service-role policy | re-run `./setup.sh` to repair the role |
+| `Execution role is not authorized for connector` | gateway service-role policy | redeploy the stack (`aws cloudformation deploy ...`) to repair the role |
 
 The CLI auto-retries transient `401/403/429/5xx` responses up to 5 times before
 surfacing an error.
@@ -207,7 +222,7 @@ surfacing an error.
 
 | Variable | Required | Purpose |
 |---|---|---|
-| `AGENTCORE_GATEWAY_URL` | yes | Gateway MCP endpoint (from `setup.sh`) |
+| `AGENTCORE_GATEWAY_URL` | yes | Gateway MCP endpoint (from step 1's stack output) |
 | `AWS_PROFILE` | no | AWS profile; otherwise the default credential chain is used |
 | `AWS_REGION` | no | Overridden by the region in the gateway URL anyway |
 
@@ -215,25 +230,24 @@ CLI flags `--gateway-url`, `--profile`, `--region` override the environment.
 
 ## Layout
 
-**Provisioning lives at the project root; the search skill is self-contained in
-`skills/agentcore-websearch/`.**
+**Provisioning (a CloudFormation template) lives at the project root; the search
+skill is self-contained in `skills/agentcore-websearch/`.**
 
 ```
 .                                   # README, AGENTS.md, LICENSE, NOTICE, CONTRIBUTING, CODE_OF_CONDUCT
-├── AGENTS.md                       # full setup/teardown guide (provision from the repo root)
-├── setup.sh                        # deploys the CloudFormation stack, writes the skill .env
-├── teardown.sh                     # deletes the CloudFormation stack
+├── AGENTS.md                       # setup/teardown guide (the same CloudFormation commands)
 ├── cfn/agentcore-websearch.yaml    # CloudFormation: IAM role + Gateway + web-search target
 └── skills/agentcore-websearch/     # ← search skill (copy this into ~/.claude/skills/)
     ├── SKILL.md                    # Claude Code skill definition (search only)
     ├── pyproject.toml              # packaging: installs the `agentcore-websearch` command
     ├── src/agentcore_websearch/    # the package (cli.py = entry point)
     ├── websearch                   # convenience wrapper around the installed CLI
-    └── .env.example                # copy to .env and fill in (setup.sh writes .env here)
+    └── .env.example                # copy to .env and fill in (step 1 writes .env here)
 ```
 
-Setup/teardown (root) and search (skill) are separated on purpose: the skill you copy
-into Claude Code can only **search** — it never creates or deletes AWS resources.
+Provisioning (root, CloudFormation) and search (skill) are separated on purpose: the
+skill you copy into Claude Code can only **search** — it never creates or deletes AWS
+resources.
 
 ## Use it as a Claude Code skill
 
@@ -252,8 +266,8 @@ repo are needed. (You still clone the repo first to get the folder to copy, and 
 `pip install .` in it.)
 
 The skill is **search-only** — it does not create or delete AWS resources. Provision
-the gateway once from the repo root (step 1, or [AGENTS.md](AGENTS.md)); `setup.sh`
-writes the gateway URL into `skills/agentcore-websearch/.env`, so the copied skill
+the gateway once from the repo root (step 1, or [AGENTS.md](AGENTS.md)); writing the
+gateway URL into `skills/agentcore-websearch/.env`, so the copied skill
 works as long as that `.env` (or an exported `AGENTCORE_GATEWAY_URL`) is present and
 your AWS credentials can invoke the gateway.
 
@@ -306,15 +320,16 @@ web-search". The working ARN includes the region:
 arn:aws:bedrock-agentcore:us-east-1:aws:tool/web-search.v1
 ```
 
-`setup.sh` and the IAM templates use the correct form.
+The CloudFormation template (`cfn/agentcore-websearch.yaml`) uses the correct form.
 
 ## Cleanup
 
-Delete all resources created by `setup.sh` (the gateway, target, and IAM role) to
-avoid any further charges. Run from the **repo root**:
+Delete the CloudFormation stack (removes the gateway, target, and IAM role) to avoid
+any further charges:
 
 ```bash
-AWS_PROFILE=your-profile ./teardown.sh
+aws cloudformation delete-stack --region us-east-1 --stack-name agentcore-websearch
+aws cloudformation wait stack-delete-complete --region us-east-1 --stack-name agentcore-websearch
 ```
 
 Also remove local artifacts if you no longer need them:
@@ -322,8 +337,6 @@ Also remove local artifacts if you no longer need them:
 ```bash
 rm -rf skills/agentcore-websearch/.venv skills/agentcore-websearch/.env
 ```
-
-See [AGENTS.md](AGENTS.md) for the full teardown guide.
 
 ## Security
 
