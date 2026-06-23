@@ -77,7 +77,12 @@ aws cloudformation delete-stack --region us-east-1 --stack-name agentcore-websea
 aws cloudformation wait stack-delete-complete --region us-east-1 --stack-name agentcore-websearch
 ```
 
-## Use it as a Claude Code skill
+## Use it from Claude Code or Codex
+
+You can drive the gateway from a coding agent in two ways: as a **packaged skill**
+(via this repo's CLI) or as a **direct MCP server** (via `mcp-proxy-for-aws`).
+
+### Claude Code (skill)
 
 [`skills/agentcore-websearch/`](skills/agentcore-websearch/SKILL.md) is a search-only
 [Claude Code](https://docs.claude.com/claude-code) skill. Install the CLI (step 2),
@@ -87,9 +92,23 @@ copy the skill, then ask Claude Code to "search the web with agentcore":
 cp -r skills/agentcore-websearch ~/.claude/skills/
 ```
 
-To let a Bedrock-hosted agent search directly, register `mcp-proxy-for-aws` as a
-stdio MCP server pointed at your gateway URL (`uvx mcp-proxy-for-aws <gateway-url>
---region us-east-1`).
+### Codex (MCP server)
+
+[Codex](https://developers.openai.com/codex/) reads this repo's
+[AGENTS.md](AGENTS.md) for guidance automatically. To give it the search tool,
+register `mcp-proxy-for-aws` as an MCP server in `~/.codex/config.toml` (point it at
+your gateway URL from step 1):
+
+```toml
+[mcp_servers.agentcore_websearch]
+command = "uvx"
+args = ["mcp-proxy-for-aws", "https://<gateway-id>.gateway.bedrock-agentcore.us-east-1.amazonaws.com/mcp", "--region", "us-east-1"]
+```
+
+The proxy SigV4-signs with your local AWS credentials (set `AWS_PROFILE` in the
+server's `env` if needed). The same stdio-MCP-server approach works for any
+MCP-compatible client (and for Claude Code via `claude mcp add`) if you'd rather not
+use the skill.
 
 ## More
 
