@@ -37,7 +37,9 @@ work from any location as long as the folder is kept intact.
 - AWS credentials available (an `AWS_PROFILE` or the default credential chain) with
   permission to create IAM roles and AgentCore gateways.
 - **AWS CLI v2 ≥ 2.35.0** (setup needs the gateway `connector` target shape).
-- **Python 3.9+** with `boto3` (for the search CLI only).
+- **Python 3.9+** for the search CLI; its one dependency, `mcp-proxy-for-aws`
+  (from `requirements.txt`), brings boto3/botocore/fastmcp. Optionally `uv` to run
+  the proxy via `uvx mcp-proxy-for-aws` without a venv.
 
 ---
 
@@ -174,10 +176,14 @@ aws bedrock-agentcore-control list-gateways --region us-east-1 \
   automatically, so a different `AWS_REGION` in the shell is fine.
 - **Cost:** ~$7 per 1,000 queries (each search = one query). The gateway/role/target
   themselves have no standing charge, but leaving them up is harmless if unused.
-- **Auto-retry:** the CLI re-signs and retries transient `401/403/429/5xx` responses
-  up to 5 times with backoff. If an error still surfaces, it's a real failure:
-  - `401 Authentication error` → AWS credentials missing/expired (refresh SSO/profile).
-  - `403 Insufficient permissions` → caller lacks `bedrock-agentcore:InvokeGateway`.
-  - `Execution role is not authorized for connector` → gateway service-role policy
-    issue (infra, not the caller).
+- **Transport:** the CLI launches AWS's `mcp-proxy-for-aws` (a stdio MCP server)
+  and talks to it with a fastmcp client; the proxy does the SigV4 signing, MCP
+  handshake, region signing, and retries. No signing code lives in this repo.
+- **Common errors:**
   - `AGENTCORE_GATEWAY_URL is not set` → run §1 Setup, or export the URL.
+  - credentials missing/expired → refresh your `AWS_PROFILE` / SSO login.
+  - `Insufficient permissions` → caller lacks `bedrock-agentcore:InvokeGateway`.
+  - `Execution role is not authorized for connector` → gateway service-role policy
+    issue (infra, not the caller); re-run `setup.sh`.
+  - `proxy command 'uvx' not found` → install `uv`, or `pip install -r requirements.txt`
+    so the proxy is on the venv, or set `AGENTCORE_PROXY_CMD`.

@@ -34,24 +34,28 @@ URLs, snippets, and publication dates. Pricing is ~$7 per 1,000 queries.
 ## How it works
 
 ```
-your machine                              AWS account (us-east-1)
-┌──────────────┐                        ┌──────────────────────────┐                  ┌──────────────┐
-│ websearch CLI│   MCP over HTTPS       │  AgentCore Gateway       │   assume role    │ web-search   │
-│              │   (JSON-RPC 2.0:       │  MCP endpoint  /mcp      │ ───────────────▶ │ connector    │
-│ agentcore_   │    initialize,         │  authorizer: AWS_IAM     │  InvokeWebSearch │ (managed     │
-│ websearch.py │    tools/list,         │                          │                  │  web index)  │
-│  + requests  │    tools/call)         │                          │                  │              │
-│              │ ─────────────────────▶ │                          │                  │              │
-│              │   SigV4-signed (IAM)   │                          │                  │              │
-└──────────────┘                        └──────────────────────────┘                  └──────────────┘
+your machine                                           AWS account (us-east-1)
+┌─────────────┐   stdio MCP    ┌────────────────────┐   MCP over HTTPS    ┌──────────────────────┐   assume role    ┌──────────────┐
+│ websearch   │ ─────────────▶ │ mcp-proxy-for-aws  │   (JSON-RPC 2.0,    │  AgentCore Gateway   │ ───────────────▶ │ web-search   │
+│ CLI         │  (fastmcp      │ (AWS MCP proxy:    │ ──────────────────▶ │  MCP endpoint  /mcp  │  InvokeWebSearch │ connector    │
+│ (this repo) │   client)      │  SigV4 + retries)  │   SigV4-signed)     │  authorizer: AWS_IAM │                  │ (managed     │
+└─────────────┘                └────────────────────┘                     └──────────────────────┘                  │  web index)  │
+                                                                                                                     └──────────────┘
 ```
 
-The CLI is a minimal **MCP (Model Context Protocol) client**: it speaks JSON-RPC 2.0
-over Streamable HTTP to the gateway's `/mcp` endpoint — an `initialize` handshake
-(carrying the `Mcp-Session-Id`), then `tools/list` and `tools/call` for the
-`WebSearch` tool. Every one of those HTTP(S) requests is SigV4-signed.
+The CLI does **not** sign requests or speak HTTP itself. It launches AWS's
+[`mcp-proxy-for-aws`](https://pypi.org/project/mcp-proxy-for-aws/) as a local
+**stdio MCP server** and talks to it with a [`fastmcp`](https://pypi.org/project/fastmcp/)
+client. The proxy is what turns MCP calls into **SigV4-signed JSON-RPC 2.0 requests
+over Streamable HTTP** to the gateway's `/mcp` endpoint (handshake, `tools/list`,
+`tools/call`), with credential resolution, region signing, and retries handled for
+you. This is why the implementation is small and there is no hand-rolled signing code.
 
-- **Inbound** (CLI → gateway): each MCP HTTPS request is SigV4-signed as service
+The same proxy is what a Bedrock-hosted agent (Claude Code / Codex / Cowork on
+Bedrock) registers as an MCP server — so the CLI and an agent reach the gateway the
+exact same way.
+
+- **Inbound** (proxy → gateway): each MCP HTTPS request is SigV4-signed as service
   `bedrock-agentcore`. The signing region is derived from the gateway hostname, so a
   mismatched `AWS_REGION` in your shell won't break it. Your IAM principal needs
   `bedrock-agentcore:InvokeGateway` on the gateway.
@@ -65,8 +69,11 @@ over Streamable HTTP to the gateway's `/mcp` endpoint — an `initialize` handsh
   create IAM roles and AgentCore gateways.
 - **AWS CLI v2 >= 2.35.0** and `bash` — earlier CLI versions lack the gateway
   `connector` target shape (`setup.sh` checks and tells you to upgrade).
-- **Python 3.9+** — only for running the search CLI (`agentcore_websearch.py`),
-  which uses `boto3` to SigV4-sign requests. Not needed to create the infrastructure.
+- **Python 3.9+** — only for running the search CLI. It depends on
+  `mcp-proxy-for-aws` (which brings `boto3`, `botocore`, and `fastmcp`). Not needed
+  to create the infrastructure.
+- Optionally [`uv`](https://docs.astral.sh/uv/) — if you'd rather run the proxy via
+  `uvx mcp-proxy-for-aws` instead of installing it into a venv.
 - Access to Amazon Bedrock AgentCore in `us-east-1`.
 - `git` to clone this repository.
 
@@ -131,15 +138,18 @@ python -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-> `boto3` here is only used by the search CLI to SigV4-sign requests; any recent
-> version works. (Creating the infrastructure is done entirely by `setup.sh` via the
-> AWS CLI — no Python or boto3 involved.)
+> The only dependency is [`mcp-proxy-for-aws`](https://pypi.org/project/mcp-proxy-for-aws/)
+> (it brings `boto3`, `botocore`, and `fastmcp`). The CLI launches that proxy to do
+> the SigV4 signing and MCP transport. If you have [`uv`](https://docs.astral.sh/uv/),
+> you can skip the venv entirely and the CLI will run the proxy via
+> `uvx mcp-proxy-for-aws`. Creating the infrastructure (`setup.sh`) uses the AWS CLI
+> only — no Python involved.
 
 ## 3. Trigger and test the search locally
 
 From `skills/agentcore-websearch/`, run the `websearch` wrapper. It loads
 `AGENTCORE_GATEWAY_URL` (and optionally `AWS_PROFILE`) from the `.env` that `setup.sh`
-wrote, signs the request with your local AWS credentials, and prints ranked results.
+wrote, runs mcp-proxy-for-aws to sign the request with your local AWS credentials, and prints ranked results.
 
 **Smoke test** — confirm the gateway and tool are reachable:
 
@@ -220,9 +230,9 @@ lives in the self-contained skill bundle, so copying that one folder is all you 
     ├── setup.sh                    # creates IAM role + gateway + web-search target
     ├── teardown.sh                 # deletes everything setup.sh created
     ├── websearch                   # bash wrapper; loads .env, requires AGENTCORE_GATEWAY_URL
-    ├── agentcore_websearch.py      # MCP client (SigV4-signs initialize + tools/call, auto-retries)
+    ├── agentcore_websearch.py      # thin CLI: drives mcp-proxy-for-aws via a fastmcp client
     ├── iam/*.template.json         # IAM trust/permission templates (placeholders filled by setup.sh)
-    ├── requirements.txt            # boto3 (runtime, for the search CLI only)
+    ├── requirements.txt            # mcp-proxy-for-aws (brings boto3/botocore/fastmcp)
     └── .env.example                # copy to .env and fill in
 ```
 
@@ -255,6 +265,40 @@ Then ask Claude Code to:
 
 See [`skills/agentcore-websearch/SKILL.md`](skills/agentcore-websearch/SKILL.md) for
 the full skill instructions.
+
+## Connect a Bedrock-hosted agent (Claude Code / Codex / Cowork on Bedrock)
+
+You don't need this repo's CLI to use the gateway from an agent — any MCP client can
+register AWS's `mcp-proxy-for-aws` as a **stdio MCP server** pointed at your gateway.
+The proxy SigV4-signs every call with the agent host's IAM role, so an
+IAM-authenticated, Bedrock-hosted agent gets web search with no extra credentials.
+
+Example MCP server entry (the shape most clients accept; field names vary by client):
+
+```json
+{
+  "mcpServers": {
+    "agentcore-websearch": {
+      "command": "uvx",
+      "args": [
+        "mcp-proxy-for-aws",
+        "https://<gateway-id>.gateway.bedrock-agentcore.us-east-1.amazonaws.com/mcp",
+        "--region", "us-east-1"
+      ]
+    }
+  }
+}
+```
+
+- **Claude Code on Bedrock** — add it with
+  `claude mcp add agentcore-websearch -- uvx mcp-proxy-for-aws <gateway-url> --region us-east-1`.
+- **Codex on Bedrock** — add the same `command`/`args` under `mcp_servers` in your
+  Codex config.
+- **Cowork (3P) on Bedrock** — register the same stdio server; queries stay inside
+  your AWS account via your own gateway.
+
+The agent's IAM principal (or instance/role credentials) needs
+`bedrock-agentcore:InvokeGateway` on the gateway, exactly like the CLI.
 
 ## ⚠️ Note on the InvokeWebSearch ARN
 

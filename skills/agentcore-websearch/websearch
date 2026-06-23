@@ -32,4 +32,11 @@ export AGENTCORE_GATEWAY_URL
 PY="$HERE/.venv/bin/python"
 [ -x "$PY" ] || PY="$(command -v python3)"
 
+# Prefer the proxy installed in our venv (from requirements.txt) so we don't
+# re-download it via uvx on every call. Falls back to the client's default
+# ("uvx mcp-proxy-for-aws") if the venv copy isn't present.
+if [ -z "${AGENTCORE_PROXY_CMD:-}" ] && [ -x "$HERE/.venv/bin/mcp-proxy-for-aws" ]; then
+  export AGENTCORE_PROXY_CMD="$HERE/.venv/bin/mcp-proxy-for-aws"
+fi
+
 exec "$PY" "$HERE/agentcore_websearch.py" "$@"

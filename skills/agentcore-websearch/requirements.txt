@@ -1,6 +1,6 @@
-# Runtime dependencies for the search CLI (agentcore_websearch.py).
-# - boto3: resolve credentials + SigV4-sign MCP requests (botocore comes with it).
-# - requests: HTTP transport (HTTP/HTTPS only — avoids urllib's file:// scheme risk).
-# Infrastructure creation uses the AWS CLI, not these.
-boto3>=1.34
-requests>=2.25
+# Runtime dependency for the search CLI (agentcore_websearch.py).
+# mcp-proxy-for-aws is AWS's MCP proxy: it SigV4-signs requests and speaks MCP to
+# the gateway, so this project doesn't hand-roll signing/transport. It pulls in
+# boto3, botocore, and fastmcp. The CLI uses fastmcp's client to drive the proxy.
+# Infrastructure creation (setup.sh) uses the AWS CLI, not these.
+mcp-proxy-for-aws>=1.6
