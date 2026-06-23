@@ -3,11 +3,11 @@
 agentcore-websearch — search the web via an AWS Bedrock AgentCore Gateway from the
 CLI, using your local AWS credentials (SigV4 / IAM). No API keys or bearer tokens.
 
-All the hard parts — SigV4 signing, the MCP `initialize`/`tools/call` handshake,
-retries, and Streamable-HTTP transport — are handled by AWS's `mcp-proxy-for-aws`
-(https://pypi.org/project/mcp-proxy-for-aws/), which this tool runs as a local
-stdio MCP server and talks to with a `fastmcp` client. That keeps this file a thin
-wrapper instead of a hand-rolled signing/transport stack.
+This is a thin client built directly on AWS's `mcp-proxy-for-aws` *library*:
+`aws_iam_streamablehttp_client` opens a SigV4-signed, Streamable-HTTP MCP connection
+to the gateway, and the official `mcp` SDK's `ClientSession` drives the protocol
+(`initialize`, `tools/list`, `tools/call`). All signing and transport live in those
+libraries — there is no hand-rolled SigV4 code and no subprocess/proxy to spawn.
 
 Usage:
   export AGENTCORE_GATEWAY_URL="https://<gateway-id>.gateway.bedrock-agentcore.us-east-1.amazonaws.com/mcp"
@@ -21,33 +21,30 @@ Config resolution (highest first):
   --gateway-url flag  >  AGENTCORE_GATEWAY_URL env   (required — no built-in default)
   --region flag       >  region parsed from gateway URL  >  AWS_REGION  >  us-east-1
   --profile flag      >  AWS_PROFILE env  >  default credential chain
-  --proxy-cmd flag    >  AGENTCORE_PROXY_CMD env  >  "uvx mcp-proxy-for-aws"
 """
 import argparse
 import asyncio
 import json
 import os
 import re
-import shlex
-import shutil
 import sys
 import urllib.parse
 
 try:
-    from fastmcp import Client
-    from fastmcp.client.transports import StdioTransport
+    from mcp_proxy_for_aws.client import aws_iam_streamablehttp_client
+    from mcp import ClientSession
 except ImportError:
     sys.exit(
-        "ERROR: fastmcp is required.  pip install -r requirements.txt "
-        "(or: pip install mcp-proxy-for-aws fastmcp)"
+        "ERROR: mcp-proxy-for-aws is required.  pip install -r requirements.txt "
+        "(or: pip install mcp-proxy-for-aws)"
     )
 
+SERVICE = "bedrock-agentcore"
 TOOL_NAME = "WebSearch"
-DEFAULT_PROXY_CMD = "uvx mcp-proxy-for-aws"
 
 # The gateway endpoint must be an HTTPS AgentCore Gateway host. We validate it before
-# launching the proxy so a malformed or unexpected value fails fast with a clear
-# message (and can't point the proxy at an unintended host / non-https scheme).
+# connecting so a malformed or unexpected value fails fast with a clear message (and
+# can't point the client at an unintended host or a non-https scheme).
 GATEWAY_HOST_RE = re.compile(
     r"^[a-z0-9-]+\.gateway\.bedrock-agentcore\.[a-z0-9-]+\.amazonaws\.com$"
 )
@@ -81,41 +78,6 @@ def region_from_url(url):
     return m.group(1) if m else None
 
 
-def build_transport(url, region, profile, proxy_cmd):
-    """Build a fastmcp StdioTransport that runs mcp-proxy-for-aws for our gateway."""
-    parts = shlex.split(proxy_cmd)
-    if not shutil.which(parts[0]):
-        raise WebSearchError(
-            f"proxy command '{parts[0]}' not found. Install uv (https://docs.astral.sh/uv/) "
-            "so `uvx mcp-proxy-for-aws` works, or set AGENTCORE_PROXY_CMD / --proxy-cmd "
-            "to a path that runs mcp-proxy-for-aws."
-        )
-    command, *prefix_args = parts
-    args = [*prefix_args, url, "--region", region]
-    if profile:
-        args += ["--profile", profile]
-    env = dict(os.environ)
-    if profile:
-        env["AWS_PROFILE"] = profile
-    return StdioTransport(command=command, args=args, env=env)
-
-
-async def _list_tools(transport):
-    async with Client(transport) as client:
-        return await client.list_tools()
-
-
-async def _call_search(transport, tool_name, query, max_results):
-    args = {"query": query}
-    if max_results is not None:
-        args["maxResults"] = max_results
-    async with Client(transport) as client:
-        if tool_name is None:
-            tools = await client.list_tools()
-            tool_name = resolve_tool_name([t.name for t in tools])
-        return await client.call_tool(tool_name, args)
-
-
 def resolve_tool_name(names):
     """The gateway namespaces tools as `<target>___WebSearch`; find it."""
     for n in names:
@@ -129,12 +91,44 @@ def resolve_tool_name(names):
     raise WebSearchError("gateway exposes no tools")
 
 
+async def _connect(url, region, profile):
+    """Open a SigV4-signed MCP session to the gateway (async context managers)."""
+    # aws_iam_streamablehttp_client resolves credentials from the given profile (or
+    # the default chain) and SigV4-signs every request as `aws_service`.
+    return aws_iam_streamablehttp_client(
+        endpoint=url,
+        aws_service=SERVICE,
+        aws_region=region,
+        aws_profile=profile,
+    )
+
+
+async def run_list_tools(url, region, profile):
+    async with await _connect(url, region, profile) as (read, write, _sid):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            result = await session.list_tools()
+            return result.tools
+
+
+async def run_search(url, region, profile, query, max_results):
+    args = {"query": query}
+    if max_results is not None:
+        args["maxResults"] = max_results
+    async with await _connect(url, region, profile) as (read, write, _sid):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            tools = await session.list_tools()
+            tool_name = resolve_tool_name([t.name for t in tools.tools])
+            return await session.call_tool(tool_name, args)
+
+
 def result_payload(call_result):
     """Pull the structured JSON payload out of an MCP tool result."""
-    # fastmcp exposes structured data when available, else text content blocks.
-    data = getattr(call_result, "data", None)
-    if isinstance(data, dict) and "results" in data:
-        return data
+    # Prefer the structured field when the SDK populates it; else parse text blocks.
+    structured = getattr(call_result, "structuredContent", None)
+    if isinstance(structured, dict) and "results" in structured:
+        return structured
     for block in getattr(call_result, "content", []) or []:
         text = getattr(block, "text", None)
         if text:
@@ -174,7 +168,7 @@ def main():
     p = argparse.ArgumentParser(
         prog="agentcore-websearch",
         description="Search the web via AWS Bedrock AgentCore Web Search (IAM/SigV4), "
-                    "using mcp-proxy-for-aws under the hood.",
+                    "using the mcp-proxy-for-aws library.",
     )
     p.add_argument("query", nargs="?", help="search query (<=200 chars)")
     p.add_argument("-n", "--max-results", type=int, default=10,
@@ -188,10 +182,6 @@ def main():
                    default=os.environ.get("AWS_REGION")
                    or os.environ.get("AWS_DEFAULT_REGION"))
     p.add_argument("--profile", default=os.environ.get("AWS_PROFILE"))
-    p.add_argument("--proxy-cmd",
-                   default=os.environ.get("AGENTCORE_PROXY_CMD", DEFAULT_PROXY_CMD),
-                   help="command that runs mcp-proxy-for-aws "
-                        f"(default: {DEFAULT_PROXY_CMD!r})")
     args = p.parse_args()
 
     if not args.gateway_url:
@@ -208,10 +198,9 @@ def main():
     try:
         url = validate_url(args.gateway_url)
         region = region_from_url(url) or args.region or "us-east-1"
-        transport = build_transport(url, region, args.profile, args.proxy_cmd)
 
         if args.list_tools:
-            tools = asyncio.run(_list_tools(transport))
+            tools = asyncio.run(run_list_tools(url, region, args.profile))
             print(json.dumps(
                 {"tools": [
                     {"name": t.name,
@@ -222,10 +211,11 @@ def main():
                 indent=2, default=str))
             return
 
-        result = asyncio.run(_call_search(transport, None, args.query, args.max_results))
+        result = asyncio.run(run_search(url, region, args.profile,
+                                        args.query, args.max_results))
     except WebSearchError as e:
         sys.exit(f"ERROR: {e}")
-    except Exception as e:  # surface proxy/transport failures cleanly
+    except Exception as e:  # surface signing/transport/connection failures cleanly
         sys.exit(f"ERROR: {type(e).__name__}: {e}")
 
     payload = result_payload(result)

@@ -38,8 +38,7 @@ work from any location as long as the folder is kept intact.
   permission to create IAM roles and AgentCore gateways.
 - **AWS CLI v2 ≥ 2.35.0** (setup needs the gateway `connector` target shape).
 - **Python 3.9+** for the search CLI; its one dependency, `mcp-proxy-for-aws`
-  (from `requirements.txt`), brings boto3/botocore/fastmcp. Optionally `uv` to run
-  the proxy via `uvx mcp-proxy-for-aws` without a venv.
+  (from `requirements.txt`), brings boto3/botocore and the `mcp` SDK.
 
 ---
 
@@ -176,14 +175,14 @@ aws bedrock-agentcore-control list-gateways --region us-east-1 \
   automatically, so a different `AWS_REGION` in the shell is fine.
 - **Cost:** ~$7 per 1,000 queries (each search = one query). The gateway/role/target
   themselves have no standing charge, but leaving them up is harmless if unused.
-- **Transport:** the CLI launches AWS's `mcp-proxy-for-aws` (a stdio MCP server)
-  and talks to it with a fastmcp client; the proxy does the SigV4 signing, MCP
-  handshake, region signing, and retries. No signing code lives in this repo.
+- **Transport:** the CLI uses the `mcp-proxy-for-aws` library
+  (`aws_iam_streamablehttp_client`) with the `mcp` SDK's `ClientSession`, in-process —
+  the library does the SigV4 signing, MCP handshake, and region signing. No signing
+  code or subprocess lives in this repo.
 - **Common errors:**
   - `AGENTCORE_GATEWAY_URL is not set` → run §1 Setup, or export the URL.
   - credentials missing/expired → refresh your `AWS_PROFILE` / SSO login.
   - `Insufficient permissions` → caller lacks `bedrock-agentcore:InvokeGateway`.
   - `Execution role is not authorized for connector` → gateway service-role policy
     issue (infra, not the caller); re-run `setup.sh`.
-  - `proxy command 'uvx' not found` → install `uv`, or `pip install -r requirements.txt`
-    so the proxy is on the venv, or set `AGENTCORE_PROXY_CMD`.
+  - `mcp-proxy-for-aws is required` → `pip install -r requirements.txt` in the bundle.
