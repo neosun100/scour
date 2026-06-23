@@ -91,15 +91,38 @@ def resolve_tool_name(names):
     raise WebSearchError("gateway exposes no tools")
 
 
+def _resolve_credentials(profile):
+    """Resolve AWS credentials via boto3 and return a frozen Credentials object.
+
+    We resolve here and pass `credentials=` to aws_iam_streamablehttp_client rather
+    than handing it `aws_profile`: the proxy's profile handling mis-signs for some
+    profile names (e.g. names containing '+'), yielding a 403, whereas explicit
+    credentials sign correctly. With profile=None this uses the default chain
+    (env vars, AWS_PROFILE, shared config, SSO, instance role, ...).
+    """
+    import boto3
+
+    session = boto3.Session(profile_name=profile) if profile else boto3.Session()
+    creds = session.get_credentials()
+    if creds is None:
+        raise WebSearchError(
+            "No AWS credentials found. Set AWS_PROFILE, run `aws configure`, or "
+            "pass --profile."
+        )
+    return creds.get_frozen_credentials()
+
+
 async def _connect(url, region, profile):
-    """Open a SigV4-signed MCP session to the gateway (async context managers)."""
-    # aws_iam_streamablehttp_client resolves credentials from the given profile (or
-    # the default chain) and SigV4-signs every request as `aws_service`.
+    """Open a SigV4-signed MCP session to the gateway (async context managers).
+
+    aws_iam_streamablehttp_client SigV4-signs every request as `aws_service` using
+    the credentials we resolve from `profile` (or the default chain).
+    """
     return aws_iam_streamablehttp_client(
         endpoint=url,
         aws_service=SERVICE,
         aws_region=region,
-        aws_profile=profile,
+        credentials=_resolve_credentials(profile),
     )
 
 
