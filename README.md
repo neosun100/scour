@@ -129,20 +129,36 @@ uvx mcp-proxy-for-aws "$GATEWAY_URL" --region us-east-1
 
 ### Option C — Claude Code or Codex
 
-**Claude Code (skill).** [`skills/agentcore-websearch/`](skills/agentcore-websearch/SKILL.md)
-is a search-only [Claude Code](https://docs.claude.com/claude-code) skill. Install the
-CLI (Option A), copy the skill, then ask Claude Code to "search the web with
-agentcore":
+Both agents support **two** ways to add the tool: install this repo's **skill** (a
+folder with [`SKILL.md`](skills/agentcore-websearch/SKILL.md) that drives the CLI from
+Option A), or register the gateway as an **MCP server** (the proxy from Option B). Use
+whichever you prefer — the skill needs the CLI installed; the MCP server doesn't.
+
+> The MCP commands below take the gateway URL from Setup. Substitute it for
+> `$GATEWAY_URL` if your client doesn't expand environment variables.
+
+**[Claude Code](https://docs.claude.com/claude-code)**
 
 ```bash
+# As a skill (requires the CLI from Option A):
 cp -r skills/agentcore-websearch ~/.claude/skills/
+
+# …or as an MCP server (no CLI needed):
+claude mcp add agentcore-websearch -- uvx mcp-proxy-for-aws "$GATEWAY_URL" --region us-east-1
 ```
 
-**Codex (MCP server).** [Codex](https://developers.openai.com/codex/) reads this
-repo's [AGENTS.md](AGENTS.md) automatically. To give it the tool, register the proxy
-(Option B) in `~/.codex/config.toml`:
+Then ask Claude Code to "search the web with agentcore".
+
+**[Codex](https://developers.openai.com/codex/)** (reads this repo's
+[AGENTS.md](AGENTS.md) automatically)
+
+```bash
+# As a skill (requires the CLI from Option A):
+cp -r skills/agentcore-websearch ~/.codex/skills/
+```
 
 ```toml
+# …or as an MCP server in ~/.codex/config.toml (no CLI needed):
 [mcp_servers.agentcore_websearch]
 command = "uvx"
 args = ["mcp-proxy-for-aws", "https://<gateway-id>.gateway.bedrock-agentcore.us-east-1.amazonaws.com/mcp", "--region", "us-east-1"]
