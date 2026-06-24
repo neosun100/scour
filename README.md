@@ -83,9 +83,17 @@ printf 'AGENTCORE_GATEWAY_URL=%s\n' "$GATEWAY_URL" > .env
 python -m venv .venv && . .venv/bin/activate
 pip install .                       # installs the `agentcore-websearch` command
 
-agentcore-websearch "latest AWS news"
-agentcore-websearch "newest python version" --max-results 5 --json
-agentcore-websearch --list-tools    # diagnostic
+agentcore-websearch "latest AWS news"                       # basic search (default 10 results)
+agentcore-websearch "newest python version" -n 5            # -n / --max-results (1–25)
+agentcore-websearch "aws re:Invent 2026 dates" --json       # raw tool result JSON (pipe to jq)
+agentcore-websearch --list-tools                            # list gateway tools and exit
+agentcore-websearch --help                                  # full usage
+
+# Override config without a .env / exported vars:
+agentcore-websearch "ecs vs eks" \
+  --gateway-url "$GATEWAY_URL" \
+  --profile my-aws-profile \
+  --region us-east-1
 ```
 
 The CLI reads `AGENTCORE_GATEWAY_URL` (and optional `AWS_PROFILE`) from `.env` or the
