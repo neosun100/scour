@@ -1,8 +1,8 @@
 # AgentCore Web Search (IAM / SigV4)
 
 A sample that provisions an **Amazon Bedrock AgentCore Gateway** with the managed
-**Web Search** tool, then calls it from a small Python CLI using your **local AWS
-credentials (SigV4/IAM)** — no API keys or bearer tokens. Web Search is fully managed,
+**Web Search** tool, then lets you call it using your **local AWS credentials
+(SigV4/IAM)** — no API keys or bearer tokens. Web Search is fully managed,
 MCP-compliant, served entirely within AWS (zero data egress), and priced at ~$7 per
 1,000 queries.
 
@@ -21,40 +21,31 @@ for grounding IAM-authenticated, Bedrock-hosted agents (e.g. **Claude Code**,
 ## How it works
 
 ```
-you ── agentcore-websearch CLI ──SigV4/MCP over HTTPS──▶ AgentCore Gateway ──▶ web-search connector
-       (mcp-proxy-for-aws lib)        (AWS_IAM auth)        assumes IAM role     (managed web index)
+                              your AWS account (us-east-1)
+ any MCP client ──SigV4 / MCP over HTTPS──▶ AgentCore Gateway ──▶ web-search connector
+ (CLI, agent, …)        (AWS_IAM auth)        assumes IAM role      (managed web index)
 ```
 
-- **Inbound** (CLI → gateway): each MCP request is SigV4-signed; your IAM principal
-  needs `bedrock-agentcore:InvokeGateway` on the gateway.
+- **Inbound** (client → gateway): each MCP request is SigV4-signed; the caller's IAM
+  principal needs `bedrock-agentcore:InvokeGateway` on the gateway.
 - **Outbound** (gateway → connector): the gateway assumes a service role granting
   `bedrock-agentcore:InvokeWebSearch`, entirely within AWS.
 
-## CLI or MCP — which to use?
-
-The gateway is a plain MCP server, so any MCP client can call it directly (see
-[Use it directly over MCP](#use-it-directly-over-mcp-no-cli)). This repo also ships a
-small **CLI** on top. Pick by use case:
-
-| Use the **CLI** when… | Use **MCP directly** when… |
-|---|---|
-| You want to search from a shell, script, or cron job | You're wiring the tool into an MCP-aware agent/IDE |
-| You want human-readable output (or `--json` for piping) | The client manages the MCP session for you |
-| You want one self-contained command + a Claude Code skill | You don't want to install this package at all |
-
-The CLI adds ergonomics — argument validation (`--max-results`, query length),
-`.env` loading, tidy result formatting, and a packaged `agentcore-websearch` command —
-but it's optional. Both paths use the same gateway and the same IAM/SigV4 auth.
+The gateway is a plain MCP server, so **any MCP client can call it**. This repo also
+ships a small CLI and a Claude Code skill on top — see [Use it](#use-it) for the
+options.
 
 ## Prerequisites
 
 - AWS credentials (`aws configure` / `AWS_PROFILE`) able to create IAM roles and
   AgentCore gateways, with access to Bedrock AgentCore in `us-east-1`.
 - **AWS CLI v2 ≥ 2.35.0** (older versions lack the gateway `connector` target shape).
-- **Python 3.9+**.
+- **Python 3.9+** (only for the CLI) and/or [`uv`](https://docs.astral.sh/uv/) (only
+  for the direct-MCP option).
 
-## 1. Deploy the gateway (CloudFormation)
+## Setup — deploy the gateway (CloudFormation)
 
+This one-time step is required for every usage option below.
 [`cfn/agentcore-websearch.yaml`](cfn/agentcore-websearch.yaml) defines the IAM service
 role, the gateway (`AWS_IAM` inbound auth), and the web-search target.
 
@@ -63,16 +54,32 @@ aws cloudformation deploy \
   --region us-east-1 --stack-name agentcore-websearch \
   --template-file cfn/agentcore-websearch.yaml --capabilities CAPABILITY_IAM
 
-# save the gateway URL where the CLI looks for it
+# capture the gateway URL (used by every option below)
 GATEWAY_URL=$(aws cloudformation describe-stacks --region us-east-1 \
   --stack-name agentcore-websearch \
   --query "Stacks[0].Outputs[?OutputKey=='GatewayUrl'].OutputValue" --output text)
-printf 'AGENTCORE_GATEWAY_URL=%s\n' "$GATEWAY_URL" > .env
+echo "$GATEWAY_URL"
 ```
 
-## 2. Install the CLI and search
+## Use it
+
+Pick the option that fits — all use the same gateway and the same IAM/SigV4 auth:
+
+| Option | Best when… |
+|---|---|
+| **A. CLI** | Searching from a shell, script, or cron job; want formatted or `--json` output |
+| **B. Any MCP client** | Wiring the tool into an MCP-aware app without installing this package |
+| **C. Claude Code / Codex** | Letting a coding agent search for you |
+
+### Option A — CLI
+
+The CLI adds ergonomics over raw MCP: argument validation, `.env` loading, tidy
+result formatting, and a packaged `agentcore-websearch` command.
 
 ```bash
+# save the gateway URL where the CLI looks for it
+printf 'AGENTCORE_GATEWAY_URL=%s\n' "$GATEWAY_URL" > .env
+
 python -m venv .venv && . .venv/bin/activate
 pip install .                       # installs the `agentcore-websearch` command
 
@@ -86,24 +93,15 @@ environment. Its only dependency is
 [`mcp-proxy-for-aws`](https://pypi.org/project/mcp-proxy-for-aws/), which handles the
 SigV4 signing and MCP transport.
 
-## 3. Clean up
+### Option B — Any MCP client (no CLI)
 
-```bash
-aws cloudformation delete-stack --region us-east-1 --stack-name agentcore-websearch
-aws cloudformation wait stack-delete-complete --region us-east-1 --stack-name agentcore-websearch
-```
+The gateway is a standard **streamable-HTTP MCP** endpoint. Auth is **AWS SigV4
+(IAM)** on service `bedrock-agentcore`, which most MCP clients can't sign on their
+own — so run AWS's [`mcp-proxy-for-aws`](https://pypi.org/project/mcp-proxy-for-aws/)
+as a local stdio MCP server that signs requests with your AWS credentials and
+forwards them to the gateway. No install of this package required.
 
-## Use it directly over MCP (no CLI)
-
-The gateway is a standard **streamable-HTTP MCP** endpoint, so you can skip this
-repo's CLI entirely and point any MCP client at it. Auth is **AWS SigV4 (IAM)** on
-service `bedrock-agentcore`, which most MCP clients can't sign on their own — so run
-AWS's [`mcp-proxy-for-aws`](https://pypi.org/project/mcp-proxy-for-aws/) as a local
-stdio MCP server that signs requests with your AWS credentials and forwards them to
-the gateway. No install of this package required (only `uv`/`uvx` or `pipx`).
-
-Configure it as an MCP server (generic form; field names vary by client). Use the
-gateway URL from step 1:
+Configure it as an MCP server (generic form; field names vary by client):
 
 ```jsonc
 {
@@ -121,37 +119,28 @@ gateway URL from step 1:
 }
 ```
 
-The MCP server exposes one tool, `WebSearch` (namespaced as
-`web-search-tool___WebSearch`), with arguments `query` (≤ 200 chars) and optional
-`maxResults` (1–25). Run the proxy standalone to inspect it:
+It exposes one tool, `WebSearch` (namespaced as `web-search-tool___WebSearch`), with
+arguments `query` (≤ 200 chars) and optional `maxResults` (1–25). Inspect it by
+running the proxy standalone:
 
 ```bash
-uvx mcp-proxy-for-aws "$AGENTCORE_GATEWAY_URL" --region us-east-1
+uvx mcp-proxy-for-aws "$GATEWAY_URL" --region us-east-1
 ```
 
-The caller's IAM principal needs `bedrock-agentcore:InvokeGateway` on the gateway.
-This is also how a Bedrock-hosted agent reaches the gateway — same proxy, same auth.
+### Option C — Claude Code or Codex
 
-## Use it from Claude Code or Codex
-
-You can drive the gateway from a coding agent as a **packaged skill** (via this
-repo's CLI) or as a **direct MCP server**.
-
-### Claude Code (skill)
-
-[`skills/agentcore-websearch/`](skills/agentcore-websearch/SKILL.md) is a search-only
-[Claude Code](https://docs.claude.com/claude-code) skill. Install the CLI (step 2),
-copy the skill, then ask Claude Code to "search the web with agentcore":
+**Claude Code (skill).** [`skills/agentcore-websearch/`](skills/agentcore-websearch/SKILL.md)
+is a search-only [Claude Code](https://docs.claude.com/claude-code) skill. Install the
+CLI (Option A), copy the skill, then ask Claude Code to "search the web with
+agentcore":
 
 ```bash
 cp -r skills/agentcore-websearch ~/.claude/skills/
 ```
 
-### Codex (MCP server)
-
-[Codex](https://developers.openai.com/codex/) reads this repo's
-[AGENTS.md](AGENTS.md) for guidance automatically. To give it the search tool,
-register the proxy in `~/.codex/config.toml`:
+**Codex (MCP server).** [Codex](https://developers.openai.com/codex/) reads this
+repo's [AGENTS.md](AGENTS.md) automatically. To give it the tool, register the proxy
+(Option B) in `~/.codex/config.toml`:
 
 ```toml
 [mcp_servers.agentcore_websearch]
@@ -159,15 +148,20 @@ command = "uvx"
 args = ["mcp-proxy-for-aws", "https://<gateway-id>.gateway.bedrock-agentcore.us-east-1.amazonaws.com/mcp", "--region", "us-east-1"]
 ```
 
-This is the [direct-MCP](#use-it-directly-over-mcp-no-cli) approach above — it works
-for any MCP-compatible client (and for Claude Code via `claude mcp add`) if you'd
-rather not use the skill.
+## Clean up
 
-## More
+Delete the stack to remove the gateway, target, and IAM role:
+
+```bash
+aws cloudformation delete-stack --region us-east-1 --stack-name agentcore-websearch
+aws cloudformation wait stack-delete-complete --region us-east-1 --stack-name agentcore-websearch
+```
+
+## Reference
 
 - **[AGENTS.md](AGENTS.md)** — full setup/teardown guide, confirmation policy, and how
   auth works.
-- **Note on the InvokeWebSearch ARN:** the docs' empty-region form
+- **InvokeWebSearch ARN gotcha:** the docs' empty-region form
   (`arn:aws:bedrock-agentcore::aws:tool/web-search.v1`) is rejected; the working ARN
   is `arn:aws:bedrock-agentcore:us-east-1:aws:tool/web-search.v1` (used by the
   template).
