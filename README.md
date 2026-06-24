@@ -149,8 +149,7 @@ claude mcp add agentcore-websearch -- uvx mcp-proxy-for-aws "$GATEWAY_URL" --reg
 
 Then ask Claude Code to "search the web with agentcore".
 
-**[Codex](https://developers.openai.com/codex/)** (reads this repo's
-[AGENTS.md](AGENTS.md) automatically)
+**[Codex](https://developers.openai.com/codex/)**
 
 ```bash
 # As a skill (requires the CLI from Option A):
@@ -177,10 +176,6 @@ aws cloudformation wait stack-delete-complete --region us-east-1 --stack-name ag
 
 - **[AGENTS.md](AGENTS.md)** — full setup/teardown guide, confirmation policy, and how
   auth works.
-- **InvokeWebSearch ARN gotcha:** the docs' empty-region form
-  (`arn:aws:bedrock-agentcore::aws:tool/web-search.v1`) is rejected; the working ARN
-  is `arn:aws:bedrock-agentcore:us-east-1:aws:tool/web-search.v1` (used by the
-  template).
 
 ## Security
 
