@@ -8,9 +8,9 @@ search_batch aggregation/de-duplication path entirely in-process.
 Run:  python -m pytest tests/ -q     (or: python tests/test_core.py)
 """
 import asyncio
+import os
 import sys
 import time
-import types
 from pathlib import Path
 
 import pytest
@@ -293,6 +293,48 @@ def test_resolve_config_requires_url(monkeypatch):
     monkeypatch.delenv("AGENTCORE_GATEWAY_URL", raising=False)
     with pytest.raises(core.WebSearchError):
         core.resolve_config()
+
+
+# --------------------------------------------------------------------------- #
+# format_error — unwrap ExceptionGroup to the root cause
+# --------------------------------------------------------------------------- #
+def test_format_error_plain():
+    assert core.format_error(ValueError("boom")) == "ValueError: boom"
+
+
+def test_format_error_unwraps_group():
+    try:
+        eg = ExceptionGroup("grp", [ConnectionError("nope")])
+    except NameError:  # pragma: no cover (py<3.11)
+        pytest.skip("ExceptionGroup needs Python 3.11+")
+    assert core.format_error(eg) == "ConnectionError: nope"
+
+
+# --------------------------------------------------------------------------- #
+# _bypass_proxy_for — append gateway host to NO_PROXY, opt-out honored
+# --------------------------------------------------------------------------- #
+def test_bypass_proxy_appends_host(monkeypatch):
+    monkeypatch.delenv("SCOUR_GATEWAY_USE_PROXY", raising=False)
+    monkeypatch.delenv("NO_PROXY", raising=False)
+    monkeypatch.delenv("no_proxy", raising=False)
+    core._bypass_proxy_for("abc.gateway.bedrock-agentcore.us-east-1.amazonaws.com")
+    assert "abc.gateway.bedrock-agentcore.us-east-1.amazonaws.com" in os.environ["NO_PROXY"]
+    assert "abc.gateway.bedrock-agentcore.us-east-1.amazonaws.com" in os.environ["no_proxy"]
+
+
+def test_bypass_proxy_optout(monkeypatch):
+    monkeypatch.setenv("SCOUR_GATEWAY_USE_PROXY", "1")
+    monkeypatch.delenv("NO_PROXY", raising=False)
+    core._bypass_proxy_for("xyz.gateway.bedrock-agentcore.us-east-1.amazonaws.com")
+    assert "xyz" not in os.environ.get("NO_PROXY", "")
+
+
+def test_bypass_proxy_preserves_existing(monkeypatch):
+    monkeypatch.delenv("SCOUR_GATEWAY_USE_PROXY", raising=False)
+    monkeypatch.setenv("NO_PROXY", "localhost,example.com")
+    core._bypass_proxy_for("g.gateway.bedrock-agentcore.us-east-1.amazonaws.com")
+    val = os.environ["NO_PROXY"]
+    assert "localhost" in val and "example.com" in val and "g.gateway" in val
 
 
 if __name__ == "__main__":

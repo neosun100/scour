@@ -223,6 +223,40 @@ def resolve_credentials(profile):
     return creds.get_frozen_credentials()
 
 
+def _bypass_proxy_for(host):
+    """Make the gateway connection bypass a local/system HTTP proxy by default.
+
+    httpx honors the OS proxy settings (trust_env) — common on macOS with Clash/Surge
+    (e.g. 127.0.0.1:7890). A flaky local proxy then breaks the TLS handshake to the
+    AgentCore gateway with an opaque ConnectError. The gateway is always an AWS
+    endpoint that's reachable directly, so we append its host to NO_PROXY unless the
+    user explicitly opts in to proxying it via SCOUR_GATEWAY_USE_PROXY=1.
+    """
+    if not host or os.environ.get("SCOUR_GATEWAY_USE_PROXY") == "1":
+        return
+    for var in ("NO_PROXY", "no_proxy"):
+        items = [x.strip() for x in os.environ.get(var, "").split(",") if x.strip()]
+        if host not in items:
+            items.append(host)
+            os.environ[var] = ",".join(items)
+
+
+def format_error(exc):
+    """Flatten an ExceptionGroup (anyio/TaskGroup) to a readable root cause string.
+
+    The streamable-HTTP transport wraps real errors in an ExceptionGroup, so a bare
+    str(exc) yields the useless 'unhandled errors in a TaskGroup'. Surface the first
+    leaf exception's type+message instead.
+    """
+    seen = exc
+    for _ in range(5):
+        subs = getattr(seen, "exceptions", None)
+        if not subs:
+            break
+        seen = subs[0]
+    return f"{type(seen).__name__}: {seen}"
+
+
 def connect(url, region, profile):
     """Return an async context manager for a SigV4-signed MCP transport.
 
@@ -236,6 +270,8 @@ def connect(url, region, profile):
             "mcp-proxy-for-aws is required. Install with `pip install .` "
             "(or `pip install mcp-proxy-for-aws`)."
         ) from e
+    parsed = urllib.parse.urlparse(url)
+    _bypass_proxy_for(parsed.hostname)
     return aws_iam_streamablehttp_client(
         endpoint=url,
         aws_service=SERVICE,
@@ -335,7 +371,7 @@ async def search_batch(
                         res = await session.call_tool(tool_name, args)
                         return query, result_payload(res), None
                     except Exception as e:  # capture, don't sink the batch
-                        return query, {}, f"{type(e).__name__}: {e}"
+                        return query, {}, format_error(e)
 
             done = await asyncio.gather(*(one(q) for q in queries))
     return aggregate(done, dedupe=dedupe)

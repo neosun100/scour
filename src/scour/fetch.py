@@ -217,7 +217,7 @@ async def fetch_articles(
                     rec["text"] = text
                     rec["chars"] = len(text)
                 except Exception as e:
-                    rec["error"] = f"{type(e).__name__}: {e}"
+                    rec["error"] = core.format_error(e)
             return rec
 
         results = await asyncio.gather(*(one(u) for u in urls))

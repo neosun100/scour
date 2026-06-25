@@ -110,7 +110,7 @@ def main():
     except core.WebSearchError as e:
         sys.exit(f"ERROR: {e}")
     except Exception as e:  # surface signing/transport/connection failures cleanly
-        sys.exit(f"ERROR: {type(e).__name__}: {e}")
+        sys.exit(f"ERROR: {core.format_error(e)}")
 
     if args.json:
         print(json.dumps(payload, indent=2, default=str))

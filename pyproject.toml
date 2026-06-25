@@ -32,8 +32,10 @@ quality = ["trafilatura>=1.8"]
 [project.scripts]
 # `scour`     -> one-shot CLI search        (scour.cli:main)
 # `scour-mcp` -> MCP server (stdio / http)  (scour.mcp_server:main)
+# `scour-http`-> REST bridge for "custom search" plugins (scour.http_bridge:main)
 scour = "scour.cli:main"
 scour-mcp = "scour.mcp_server:main"
+scour-http = "scour.http_bridge:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/scour"]
