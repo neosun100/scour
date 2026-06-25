@@ -3,22 +3,37 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "agentcore-websearch"
+name = "scour"
 version = "1.0.0"
-description = "CLI to search the web via an AWS Bedrock AgentCore Gateway using local AWS credentials (SigV4/IAM)."
+description = "Scour — concurrent web search & full-text research for agents, grounded in Amazon Bedrock AgentCore Web Search (CLI + MCP server, SigV4/IAM auth)."
 readme = "README.md"
 requires-python = ">=3.9"
 license = "MIT-0"
-keywords = ["aws", "bedrock", "agentcore", "mcp", "web-search", "sigv4"]
+keywords = ["aws", "bedrock", "agentcore", "mcp", "web-search", "research", "concurrent", "sigv4", "firecrawl"]
 dependencies = [
-  # AWS MCP proxy library: SigV4 signing + streamable-HTTP MCP transport.
-  # Brings boto3, botocore, and the mcp SDK transitively.
+  # AWS MCP proxy library: SigV4 signing + streamable-HTTP MCP transport (the
+  # upstream client to AgentCore). Brings boto3, botocore, and the mcp SDK.
   "mcp-proxy-for-aws>=1.6",
+  # MCP SDK — needed for the FastMCP *server* (mcp.server.fastmcp) and its
+  # stdio + streamable-HTTP transports. Pinned for the streamable-HTTP support.
+  "mcp>=1.9.0",
+  # Concurrent full-text article fetching + main-text extraction (the research /
+  # open-source-Firecrawl layer). httpx is async; bs4+lxml extract article text.
+  "httpx>=0.27",
+  "beautifulsoup4>=4.12",
+  "lxml>=5.0",
 ]
 
+[project.optional-dependencies]
+# Higher-quality main-text extraction. `pip install .[quality]`. The fetcher
+# auto-uses trafilatura when present and falls back to bs4/lxml otherwise.
+quality = ["trafilatura>=1.8"]
+
 [project.scripts]
-# Installs an `agentcore-websearch` console command -> agentcore_websearch.cli:main
-agentcore-websearch = "agentcore_websearch.cli:main"
+# `scour`     -> one-shot CLI search        (scour.cli:main)
+# `scour-mcp` -> MCP server (stdio / http)  (scour.mcp_server:main)
+scour = "scour.cli:main"
+scour-mcp = "scour.mcp_server:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/agentcore_websearch"]
+packages = ["src/scour"]

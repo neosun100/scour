@@ -3,7 +3,7 @@
 This file guides an agent (or a human) through **provisioning and removing** the AWS
 infrastructure for AgentCore Web Search, run **from the project root**. Once setup is
 done, day-to-day searching is handled by the skill in
-[`skills/agentcore-websearch/`](skills/agentcore-websearch/SKILL.md) — that skill
+[`skills/scour/`](skills/scour/SKILL.md) — that skill
 does **not** create or delete anything.
 
 There are **no setup/teardown scripts** — provisioning is a CloudFormation stack you
@@ -86,12 +86,12 @@ printf 'AGENTCORE_GATEWAY_URL=%s\n' "$GATEWAY_URL" > .env
 ```bash
 # from the project root
 python3 -m venv .venv && . .venv/bin/activate && pip install .   # once
-agentcore-websearch "latest AWS news"
-agentcore-websearch "newest python version" --max-results 5 --json
+scour "latest AWS news"
+scour "newest python version" --max-results 5 --json
 ```
 
-The `agentcore-websearch` package lives at the repo root; the
-[`skills/agentcore-websearch/`](skills/agentcore-websearch/SKILL.md) folder is a
+The `scour` package lives at the repo root; the
+[`skills/scour/`](skills/scour/SKILL.md) folder is a
 search-only Claude Code skill that calls this same CLI (copy it into
 `~/.claude/skills/`).
 
