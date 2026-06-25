@@ -7,7 +7,7 @@ name = "scour"
 version = "1.0.0"
 description = "Scour — concurrent web search & full-text research for agents, grounded in Amazon Bedrock AgentCore Web Search (CLI + MCP server, SigV4/IAM auth)."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = "MIT-0"
 keywords = ["aws", "bedrock", "agentcore", "mcp", "web-search", "research", "concurrent", "sigv4", "firecrawl"]
 dependencies = [
