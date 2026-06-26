@@ -40,6 +40,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 from . import core
+from . import auth
+
+# API keys required for incoming requests (empty set = no auth). Set by main().
+_API_KEYS = set()
 
 _QUERY_KEYS = ("q", "query", "search", "keyword", "text", "input")
 _MAX_KEYS = ("maxResults", "max_results", "count", "limit", "num", "n")
@@ -133,6 +137,14 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def _handle(self):
+        # API-key gate (when configured). OPTIONS is handled separately (no auth).
+        if _API_KEYS and not auth.key_ok(
+            auth.extract_key(lambda n: self.headers.get(n)), _API_KEYS
+        ):
+            self._send(401, {"error": "unauthorized: missing or invalid API key "
+                                      "(send 'Authorization: Bearer <key>' or "
+                                      "'X-API-Key: <key>')", "results": []})
+            return
         parsed = urlparse(self.path)
         qs = parse_qs(parsed.query)
         body_obj = None
@@ -184,12 +196,28 @@ def main():
     core.load_dotenv()
     p = argparse.ArgumentParser(
         prog="scour-http",
-        description="Local REST bridge: 'custom search' plugins -> Scour -> AgentCore.",
+        description="Local/hosted REST bridge: 'custom search' plugins -> Scour -> AgentCore.",
     )
     p.add_argument("--host", default=os.environ.get("SCOUR_HTTP_HOST", "127.0.0.1"))
     p.add_argument("--port", type=int,
                    default=int(os.environ.get("SCOUR_HTTP_PORT", "3000")))
+    p.add_argument("--api-key", action="append", default=None, metavar="KEY",
+                   help="require this API key on requests (repeatable; or set "
+                        "SCOUR_API_KEYS=k1,k2). Sent as 'Authorization: Bearer <key>' "
+                        "or 'X-API-Key: <key>'.")
+    p.add_argument("--insecure", action="store_true",
+                   help="allow binding a non-loopback host with NO API key (unsafe).")
+    p.add_argument("--gen-key", action="store_true",
+                   help="print a fresh strong API key and exit.")
     args = p.parse_args()
+
+    if args.gen_key:
+        print(auth.generate_key())
+        return
+
+    global _API_KEYS
+    _API_KEYS = auth.resolve_keys(args.api_key)
+    auth.require_or_refuse(args.host, _API_KEYS, args.insecure, p.error)
 
     # Validate config up front (fail fast if the gateway URL/creds are missing).
     try:
@@ -198,10 +226,11 @@ def main():
         p.error(str(e))
 
     httpd = ThreadingHTTPServer((args.host, args.port), Handler)
+    authmsg = (f"API-key auth ON ({len(_API_KEYS)} key(s))" if _API_KEYS
+               else "NO AUTH (loopback only)")
     sys.stderr.write(
-        f"[scour-http] listening on http://{args.host}:{args.port}  "
-        f"(GET/POST any path; ?q= or JSON {{\"query\":...}})\n"
-        f"[scour-http] each request is logged below so you can match your client.\n"
+        f"[scour-http] listening on http://{args.host}:{args.port}  [{authmsg}]\n"
+        f"[scour-http] GET/POST any path; ?q= or JSON {{\"query\":...}}\n"
     )
     sys.stderr.flush()
     try:

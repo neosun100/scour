@@ -30,11 +30,13 @@ extraction or to build a competing index. Results here always include those fiel
 """
 import argparse
 import os
+import sys
 
 from mcp.server.fastmcp import FastMCP
 
 from . import core
 from . import fetch
+from . import auth
 
 # Runtime config, populated by main() before the server starts serving.
 _CFG = {
@@ -198,6 +200,29 @@ async def research(
     )
 
 
+class _ApiKeyASGI:
+    """ASGI middleware: require a valid API key on HTTP requests (OPTIONS exempt)."""
+
+    def __init__(self, app, keys):
+        self.app = app
+        self.keys = keys
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http" or scope.get("method") == "OPTIONS":
+            return await self.app(scope, receive, send)
+        hdrs = {k.decode("latin1").lower(): v.decode("latin1")
+                for k, v in scope.get("headers", [])}
+        provided = auth.extract_key(lambda n: hdrs.get(n.lower()))
+        if not auth.key_ok(provided, self.keys):
+            body = b'{"error":"unauthorized: missing or invalid API key"}'
+            await send({"type": "http.response.start", "status": 401,
+                        "headers": [(b"content-type", b"application/json"),
+                                    (b"content-length", str(len(body)).encode())]})
+            await send({"type": "http.response.body", "body": body})
+            return
+        await self.app(scope, receive, send)
+
+
 def main():
     core.load_dotenv()
     p = argparse.ArgumentParser(
@@ -234,7 +259,18 @@ def main():
                         f"{fetch.DEFAULT_MAX_CHARS})")
     p.add_argument("--no-robots", action="store_true",
                    help="do NOT honor robots.txt when fetching (default: honor it)")
+    p.add_argument("--api-key", action="append", default=None, metavar="KEY",
+                   help="require this API key on --http requests (repeatable; or set "
+                        "SCOUR_API_KEYS). Sent as 'Authorization: Bearer <key>'.")
+    p.add_argument("--insecure", action="store_true",
+                   help="allow --http on a non-loopback host with NO API key (unsafe).")
+    p.add_argument("--gen-key", action="store_true",
+                   help="print a fresh strong API key and exit.")
     args = p.parse_args()
+
+    if args.gen_key:
+        print(auth.generate_key())
+        return
 
     # Validate config up front so misconfiguration fails before the server starts.
     try:
@@ -258,10 +294,21 @@ def main():
                 respect_robots=not args.no_robots)
 
     if args.http:
-        # FastMCP reads host/port from its settings for the HTTP transports.
+        keys = auth.resolve_keys(args.api_key)
+        auth.require_or_refuse(args.host, keys, args.insecure, p.error)
         mcp.settings.host = args.host
         mcp.settings.port = args.port
-        mcp.run(transport="streamable-http")
+        if keys:
+            # Gate the streamable-HTTP ASGI app with API-key auth, served by uvicorn.
+            import uvicorn
+            app = _ApiKeyASGI(mcp.streamable_http_app(), keys)
+            sys.stderr.write(
+                f"[scour-mcp] streamable-HTTP on {args.host}:{args.port}/mcp "
+                f"[API-key auth ON, {len(keys)} key(s)]\n")
+            sys.stderr.flush()
+            uvicorn.run(app, host=args.host, port=args.port, log_level="info")
+        else:
+            mcp.run(transport="streamable-http")
     else:
         mcp.run(transport="stdio")
 
