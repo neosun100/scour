@@ -75,6 +75,7 @@ Pick the option that fits — all use the same gateway and the same IAM/SigV4 au
 | **B. Any MCP client** | Wiring the tool into an MCP-aware app without installing this package |
 | **C. Claude Code / Codex** | Letting a coding agent search for you |
 | **D. Concurrent MCP server** | Giving *any* agent one MCP endpoint that fans out **many searches in parallel** (this repo's `scour-mcp`) |
+| **E. Hosted REST service** | A plain-HTTP `/search` endpoint, API-key protected, that any app/"custom search" plugin can call with no AWS creds (this repo's `scour-http`) |
 
 ### Option A — CLI
 
@@ -277,6 +278,126 @@ the **Rate of Web Search Tool requests** quota (and `--rate`) for faster fan-out
 > and copyright (not AgentCore's policy). The fetcher honors robots.txt by default,
 > rate-limits, and bounds each download. Fetch only pages you're permitted to read,
 > keep citations, and don't redistribute full text in bulk.
+
+### Option E — Hosted REST search service (`scour-http`)
+
+For chat clients / apps whose "custom search" wants a plain **HTTP URL** (not MCP),
+and for a **central service any tool can call with just an API key** — no AWS
+credentials downstream. `scour-http` is a tiny REST bridge: `GET/POST /search` →
+AgentCore → JSON. It holds the AWS identity centrally; clients present only an API key.
+
+- **API-key auth** via `Authorization: Bearer <key>` or `X-API-Key: <key>`. Keys come
+  from `--api-key` (repeatable) or `SCOUR_API_KEYS` (comma-separated env).
+- **Secure-by-default**: refuses to bind a non-loopback host without a key (unless
+  `--insecure`). Generate a strong key with `scour-http --gen-key`.
+
+```bash
+pip install .                               # or: uv pip install .
+KEY=$(scour-http --gen-key)
+scour-http --port 3000 --api-key "$KEY"     # serve locally
+
+curl "http://127.0.0.1:3000/search?q=hello&maxResults=5" -H "Authorization: Bearer $KEY"
+curl -X POST http://127.0.0.1:3000/search -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $KEY" \
+  -d '{"query":"hello","maxResults":5,"exclude":["example.com"]}'
+```
+
+- **Request**: `q` or `query` (query-string or JSON), optional `maxResults` (1–25,
+  capped at 25 — AgentCore's per-query max) and `exclude` (domains to drop).
+- **Response**: `{query, total, results:[{title,url,content,snippet,text,publishedDate}]}`.
+- Point a client's **custom-search URL** at `https://<your-host>/search` and set its
+  result cap to **25**. (If the model's built-in search is on, the custom plugin is bypassed.)
+
+#### Host it as a service (systemd + nginx + Cloudflare) — replicate on any box
+
+This is how the reference deployment `https://scour.aws.xin` runs. Replicate on any
+Linux host with nginx + a public domain:
+
+**1. Least-privilege IAM user** (in the gateway's account — can *only* invoke this one gateway):
+
+```bash
+aws iam create-user --user-name scour-websearch-invoker
+aws iam put-user-policy --user-name scour-websearch-invoker --policy-name InvokeOneGateway \
+  --policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow",
+  "Action":"bedrock-agentcore:InvokeGateway",
+  "Resource":"arn:aws:bedrock-agentcore:us-east-1:<ACCOUNT_ID>:gateway/<GATEWAY_ID>"}]}'
+aws iam create-access-key --user-name scour-websearch-invoker   # capture the key
+```
+
+**2. Install (uv) + secrets file** on the box (`/etc/scour.env`, perms 600 — never in git):
+
+```bash
+git clone <your-repo> /opt/scour && cd /opt/scour
+uv venv && uv pip install .
+sudo install -m 600 /dev/stdin /etc/scour.env <<EOF
+AGENTCORE_GATEWAY_URL=https://<gateway-id>.gateway.bedrock-agentcore.us-east-1.amazonaws.com/mcp
+AWS_REGION=us-east-1
+AWS_ACCESS_KEY_ID=<from step 1>
+AWS_SECRET_ACCESS_KEY=<from step 1>
+SCOUR_API_KEYS=$(/opt/scour/.venv/bin/scour-http --gen-key)
+EOF
+```
+
+**3. systemd service** (loopback bind, auto-restart, auto-start on boot):
+
+```ini
+# /etc/systemd/system/scour-http.service
+[Unit]
+Description=Scour HTTP search bridge (AgentCore Web Search)
+After=network-online.target
+Wants=network-online.target
+[Service]
+EnvironmentFile=/etc/scour.env
+ExecStart=/opt/scour/.venv/bin/scour-http --host 127.0.0.1 --port 8770
+Restart=always
+RestartSec=3
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl daemon-reload && sudo systemctl enable --now scour-http
+```
+
+**4. nginx reverse proxy** — add a *new* site file (don't edit existing ones), then
+`sudo nginx -t && sudo nginx -s reload`:
+
+```nginx
+server {
+    listen 443 ssl http2;
+    server_name scour.<your-domain>;
+    ssl_certificate     /etc/nginx/<your-domain>.pem;
+    ssl_certificate_key /etc/nginx/<your-domain>.pem;
+    location / {
+        proxy_pass http://127.0.0.1:8770;
+        proxy_set_header Host $host;
+        proxy_set_header Authorization $http_authorization;   # pass the API key through
+        proxy_set_header Connection "";
+        proxy_buffering off;
+    }
+}
+```
+
+**5. DNS**: point `scour.<your-domain>` at the box (e.g. Cloudflare, proxied).
+
+**6. Call it from anywhere** (only the API key needed — no AWS creds):
+
+```bash
+curl "https://scour.<your-domain>/search?q=...&maxResults=10" \
+  -H "Authorization: Bearer <SCOUR_API_KEY>"
+```
+
+**Operate it**:
+- Rotate/add API keys → edit `SCOUR_API_KEYS` in `/etc/scour.env` → `systemctl restart scour-http`.
+- Rotate AWS creds → recreate the IAM access key → update `/etc/scour.env` → restart.
+- Logs → `journalctl -u scour-http -f`.
+
+> **Security:** the AWS access key lives only in `/etc/scour.env` (perms 600) and is
+> never sent to clients — they authenticate with the Scour API key. The IAM user can
+> only `InvokeGateway` on the single gateway, so a leaked API key can at most run
+> searches (on your bill), nothing else. Throughput is bounded by AgentCore's Web
+> Search quota (10 TPS default; the bridge serves one query per request and does not
+> rate-limit across simultaneous requests, so use `web_search_batch` for large fan-out).
 
 ## Clean up
 
