@@ -43,6 +43,10 @@ IAM-authenticated, Bedrock-hosted agents (e.g. **Claude Code**, **Codex**, or
 > credential rotation). Review and adapt before any real-world use. Provided "as is"
 > (see [LICENSE](LICENSE)).
 
+<p align="center">
+  <img src="assets/demo.gif" alt="Scour demo — single search, concurrent batch (URL-deduped), and full-text research against AgentCore Web Search" width="100%">
+</p>
+
 ## How it works
 
 <p align="center">
