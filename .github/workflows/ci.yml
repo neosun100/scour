@@ -22,11 +22,10 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      # uv keeps everything in an isolated venv — no global/env conflicts.
-      - name: Create env and install project + test deps
-        run: |
-          uv venv
-          uv pip install . pytest
+      # setup-uv (with python-version) already creates .venv and sets VIRTUAL_ENV,
+      # so install straight into it — no `uv venv` (it would error "already exists").
+      - name: Install project + test deps
+        run: uv pip install . pytest
 
       - name: Run unit tests (offline — no AWS/network)
-        run: uv run pytest -q
+        run: .venv/bin/pytest -q

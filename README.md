@@ -10,6 +10,7 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/neosun100/scour/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/neosun100/scour/actions/workflows/ci.yml/badge.svg"></a>
   <a href="LICENSE"><img alt="License: MIT-0" src="https://img.shields.io/badge/License-MIT--0-blue.svg"></a>
   <img alt="Python 3.10+" src="https://img.shields.io/badge/python-3.10%2B-3776AB.svg?logo=python&logoColor=white">
   <img alt="Tests: 47 passing" src="https://img.shields.io/badge/tests-47%20passing-brightgreen.svg">
