@@ -85,7 +85,7 @@ printf 'AGENTCORE_GATEWAY_URL=%s\n' "$GATEWAY_URL" > .env
 
 ```bash
 # from the project root
-python3 -m venv .venv && . .venv/bin/activate && pip install .   # once
+uv venv && . .venv/bin/activate && uv pip install .   # once (uv avoids env conflicts)
 scour "latest AWS news"
 scour "newest python version" --max-results 5 --json
 ```

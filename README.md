@@ -1,7 +1,27 @@
-# Scour
+<p align="center">
+  <img src="assets/logo.png" alt="Scour" width="150" height="150">
+</p>
 
-**Scour** — concurrent web research for agents, grounded in **Amazon Bedrock
-AgentCore Web Search**. Scour provisions an **AgentCore Gateway** with the managed
+<h1 align="center">Scour</h1>
+
+<p align="center">
+  <strong>Concurrent web search &amp; full-text research for agents</strong><br>
+  grounded in Amazon Bedrock AgentCore Web Search — CLI · MCP server · REST, all via local AWS IAM/SigV4.
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img alt="License: MIT-0" src="https://img.shields.io/badge/License-MIT--0-blue.svg"></a>
+  <img alt="Python 3.10+" src="https://img.shields.io/badge/python-3.10%2B-3776AB.svg?logo=python&logoColor=white">
+  <img alt="Tests: 47 passing" src="https://img.shields.io/badge/tests-47%20passing-brightgreen.svg">
+  <img alt="MCP compatible" src="https://img.shields.io/badge/MCP-compatible-5eead4.svg">
+  <img alt="AWS Bedrock AgentCore" src="https://img.shields.io/badge/AWS-Bedrock%20AgentCore-FF9900.svg?logo=amazonaws&logoColor=white">
+  <img alt="Region us-east-1" src="https://img.shields.io/badge/region-us--east--1-232F3E.svg">
+</p>
+
+---
+
+**Scour** turns the single managed **Amazon Bedrock AgentCore Web Search** tool into a
+full toolkit for agents. Scour provisions an **AgentCore Gateway** with the managed
 **Web Search** tool and gives you a CLI + an MCP server that call it using your
 **local AWS credentials (SigV4/IAM)** — no API keys or bearer tokens. On top of the
 single managed search tool, Scour adds **concurrent fan-out** and **full-text
@@ -23,6 +43,10 @@ IAM-authenticated, Bedrock-hosted agents (e.g. **Claude Code**, **Codex**, or
 > (see [LICENSE](LICENSE)).
 
 ## How it works
+
+<p align="center">
+  <img src="assets/architecture.png" alt="Scour architecture: clients → Scour (CLI/MCP/REST) → AgentCore Web Search" width="100%">
+</p>
 
 ```
                               your AWS account (us-east-1)
@@ -86,8 +110,8 @@ result formatting, and a packaged `scour` command.
 # save the gateway URL where the CLI looks for it
 printf 'AGENTCORE_GATEWAY_URL=%s\n' "$GATEWAY_URL" > .env
 
-python -m venv .venv && . .venv/bin/activate
-pip install .                       # installs the `scour` command
+uv venv && . .venv/bin/activate     # isolated env via uv (avoids dependency conflicts)
+uv pip install .                    # installs the `scour` command
 
 scour "latest AWS news"                       # basic search (default 10 results)
 scour "newest python version" -n 5            # -n / --max-results (1–25)
@@ -213,7 +237,7 @@ It exposes four tools:
 Install and run (needs the gateway from Setup and `AGENTCORE_GATEWAY_URL` set):
 
 ```bash
-pip install .                              # installs `scour-mcp`
+uv pip install .                           # installs `scour-mcp`
 
 scour-mcp                     # stdio (default) — for a local agent
 scour-mcp --http              # streamable-HTTP on 127.0.0.1:8000/mcp
@@ -231,7 +255,7 @@ For higher-quality main-text extraction, install the optional extra (the fetcher
 auto-uses it, falling back to bs4/lxml when absent):
 
 ```bash
-pip install ".[quality]"        # adds trafilatura
+uv pip install ".[quality]"     # adds trafilatura
 ```
 
 Register the **stdio** server with a coding agent (it signs with your AWS creds):
@@ -292,7 +316,7 @@ AgentCore → JSON. It holds the AWS identity centrally; clients present only an
   `--insecure`). Generate a strong key with `scour-http --gen-key`.
 
 ```bash
-pip install .                               # or: uv pip install .
+uv pip install .                            # uv recommended (avoids env conflicts)
 KEY=$(scour-http --gen-key)
 scour-http --port 3000 --api-key "$KEY"     # serve locally
 
